@@ -1,7 +1,7 @@
 import { createClient, type GenericCtx } from '@convex-dev/better-auth';
 import { convex } from '@convex-dev/better-auth/plugins';
 import { betterAuth } from 'better-auth';
-import { apiKey, organization } from 'better-auth/plugins';
+import { apiKey, auth0, genericOAuth, organization } from 'better-auth/plugins';
 import { createAccessControl } from 'better-auth/plugins/access';
 import {
   defaultStatements,
@@ -283,6 +283,15 @@ export const getAuthOptions = (ctx: GenericCtx<DataModel>) => {
           timeWindow: 60,
           maxRequests: 100,
         },
+      }),
+      genericOAuth({
+        config: [
+          auth0({
+            clientId: process.env.AUTH0_CLIENT_ID,
+            clientSecret: process.env.AUTH0_CLIENT_SECRET,
+            domain: process.env.AUTH0_DOMAIN,
+          }),
+        ],
       }),
     ],
   };
