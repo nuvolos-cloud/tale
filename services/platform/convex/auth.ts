@@ -9,6 +9,7 @@ import {
 } from 'better-auth/plugins/organization/access';
 
 import { isRecord, getString } from '../lib/utils/type-guards';
+import { provisionAuth0User } from './betterAuth/provision_auth0_user';
 import { components } from './_generated/api';
 import { DataModel } from './_generated/dataModel';
 import authConfig from './auth.config';
@@ -220,6 +221,15 @@ export const getAuthOptions = (ctx: GenericCtx<DataModel>) => {
     baseURL: siteUrl,
     trustedOrigins: [new URL(siteUrl).origin],
     database: authComponent.adapter(ctx),
+    databaseHooks: {
+      session: {
+        create: {
+          after: async (session: { userId: string }) => {
+            await provisionAuth0User(ctx, session.userId);
+          },
+        },
+      },
+    },
     // Configure simple, non-verified email/password to get started
     emailAndPassword: {
       enabled: true,
