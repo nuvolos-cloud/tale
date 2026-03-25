@@ -241,6 +241,18 @@ export const getAuthOptions = (ctx: GenericCtx<DataModel>) => {
       cookiePrefix: 'better-auth',
       // Force secure cookies when running over HTTPS (this adds __Secure- prefix automatically)
       useSecureCookies: isHttps,
+      // SameSite=None is required for cross-origin iframe embedding (e.g. Nuvolos).
+      // Only applied over HTTPS — browsers silently reject SameSite=None on plain HTTP.
+      ...(isHttps && {
+        cookies: {
+          sessionToken: {
+            attributes: {
+              sameSite: 'none' as const,
+              secure: true,
+            },
+          },
+        },
+      }),
     },
     session: {
       additionalFields: {

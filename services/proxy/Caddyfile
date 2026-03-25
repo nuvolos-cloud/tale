@@ -208,7 +208,7 @@
 	header {
 		-Server
 		X-Content-Type-Options "nosniff"
-		X-Frame-Options "SAMEORIGIN"
+		Content-Security-Policy "frame-ancestors 'self' https://*.app.az.nuvolos.cloud"
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 

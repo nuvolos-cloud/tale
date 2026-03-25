@@ -41,40 +41,38 @@ CADDYFILE="/config/Caddyfile"
 echo "TLS Configuration:"
 echo "  TLS_MODE: ${TLS_MODE:-selfsigned}"
 
-# HTTPS is required — OAuth providers reject http:// callbacks and crypto.subtle
-# is unavailable in insecure contexts. Use a reverse proxy for TLS termination
-# if needed, but always set SITE_URL to https://.
-if echo "${SITE_URL}" | grep -qi '^http://'; then
-  echo "Error: SITE_URL must use https://. Plain HTTP is not supported." >&2
-  echo "  If running behind a TLS-terminating reverse proxy, set SITE_URL=https://..." >&2
-  exit 1
-fi
+# Copy Caddyfile to writable location, then apply TLS config
+cp "$CADDYFILE_SRC" "$CADDYFILE"
 
-case "${TLS_MODE:-selfsigned}" in
+if echo "${SITE_URL}" | grep -qi '^http://' || [ "${TLS_MODE:-selfsigned}" = "none" ]; then
+  # Plain HTTP mode — remove the TLS directive line entirely.
+  # Two cases:
+  #   SITE_URL=http://...      — fully local dev, no external proxy
+  #   TLS_MODE=none            — behind an external TLS-terminating reverse proxy
+  #                              (SITE_URL is https:// but Caddy listens on plain HTTP)
+  echo "  Mode: Plain HTTP (no TLS)"
+  sed -i "/TLS_PLACEHOLDER/d" "$CADDYFILE"
+else
+  case "${TLS_MODE:-selfsigned}" in
     letsencrypt)
       echo "  Mode: Let's Encrypt (ACME - trusted certificates)"
       if [ -n "${TLS_EMAIL:-}" ]; then
         echo "  Email: ${TLS_EMAIL}"
-        # ACME with email for notifications
         TLS_CONFIG="tls ${TLS_EMAIL}"
       else
         echo "  Warning: TLS_EMAIL not set, certificate expiry notifications disabled"
-        # ACME without email
         TLS_CONFIG="tls"
       fi
       ;;
     selfsigned|*)
       echo "  Mode: Self-signed (internal CA - browser warning expected)"
       echo "  To trust certs on host: docker exec tale-proxy caddy trust"
-      # Internal CA for self-signed certificates
       TLS_CONFIG="tls internal"
       ;;
   esac
-
-# Copy Caddyfile to writable location and apply TLS config
-cp "$CADDYFILE_SRC" "$CADDYFILE"
-sed -i "s|.*TLS_PLACEHOLDER.*|\\t${TLS_CONFIG}|" "$CADDYFILE"
-echo "  Caddyfile configured: ${TLS_CONFIG}"
+  sed -i "s|.*TLS_PLACEHOLDER.*|\\t${TLS_CONFIG}|" "$CADDYFILE"
+  echo "  Caddyfile configured: ${TLS_CONFIG}"
+fi
 
 # Function to fix certificate permissions after Caddy generates them
 fix_cert_permissions() {
