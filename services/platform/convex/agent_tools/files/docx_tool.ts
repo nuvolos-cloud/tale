@@ -149,6 +149,8 @@ export const docxTool = {
   tool: createTool({
     description: `Word document (DOCX) tool for listing templates, generating, and parsing documents.
 
+IMPORTANT: Only call the "generate" operation when the user explicitly requests creating or exporting a Word/DOCX file. Do NOT proactively generate Word documents unless the user specifically asks for this format.
+
 OPERATIONS:
 
 1. list_templates - List all available DOCX templates
@@ -192,10 +194,13 @@ EXAMPLES:
 • List templates: { "operation": "list_templates" }
 • Parse: { "operation": "parse", "fileId": "kg2bazp7...", "filename": "document.docx", "user_input": "Extract the main points" }
 
-AFTER GENERATING: The file automatically appears as a download card in the chat. Do NOT mention downloading, do NOT include a link, and do NOT say "you can download it" — the card handles this. To also save the file to a folder in the documents hub, call document_write with the returned fileStorageId and the desired folderPath.
+AFTER GENERATING: Check the downloadUrl in the result:
+- If it says "[file card shown in chat]": the file is already visible as a download card. Do NOT mention downloading, do NOT include a link, and do NOT say "you can download it" — the card handles this.
+- If it contains an actual URL: no download card was shown. You MUST include the URL as a clickable markdown link so the user can download the file.
+To also save the file to a folder in the documents hub, call document_write with the returned fileStorageId and the desired folderPath.
 `,
-    args: docxArgs,
-    handler: async (ctx: ToolCtx, args): Promise<DocxResult> => {
+    inputSchema: docxArgs,
+    execute: async (ctx: ToolCtx, args): Promise<DocxResult> => {
       const { organizationId } = ctx;
 
       if (args.operation === 'list_templates') {

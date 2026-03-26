@@ -24,9 +24,22 @@ fi
 SITE_URL=$(echo "${SITE_URL}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 export SITE_URL
 
+# Base path for subpath deployments (from .env, e.g., /test or /app)
+# Strip trailing slashes, ensure leading slash if non-empty, strip SITE_URL trailing slash
+BASE_PATH=$(echo "${BASE_PATH:-}" | sed 's|/\+$||')
+if [ -n "$BASE_PATH" ] && [ "${BASE_PATH#/}" = "$BASE_PATH" ]; then
+  BASE_PATH="/${BASE_PATH}"
+fi
+SITE_URL=$(echo "${SITE_URL}" | sed 's|/\+$||')
+export BASE_PATH
+export SITE_URL
+
 echo "Domain Configuration:"
 echo "  HOST: ${HOST}"
 echo "  SITE_URL: ${SITE_URL}"
+if [ -n "$BASE_PATH" ]; then
+  echo "  BASE_PATH: ${BASE_PATH}"
+fi
 
 # Source and destination for Caddyfile
 # We copy to /config (writable volume) because /etc/caddy is read-only in the image
@@ -92,16 +105,19 @@ fix_cert_permissions() {
 }
 
 # Start a background process to fix permissions after Caddy generates certs
-(
-  # Wait for Caddy to generate certificates (check every 5 seconds for up to 60 seconds)
-  for _ in $(seq 1 12); do
-    sleep 5
-    if [ -f "/data/caddy/pki/authorities/local/root.crt" ]; then
-      fix_cert_permissions
-      break
-    fi
-  done
-) &
+# (not needed for external mode — no certificates are generated)
+if [ "${TLS_MODE:-selfsigned}" != "external" ]; then
+  (
+    # Wait for Caddy to generate certificates (check every 5 seconds for up to 60 seconds)
+    for _ in $(seq 1 12); do
+      sleep 5
+      if [ -f "/data/caddy/pki/authorities/local/root.crt" ]; then
+        fix_cert_permissions
+        break
+      fi
+    done
+  ) &
+fi
 
 # For Let's Encrypt mode: retry certificate obtention if DNS wasn't ready at startup.
 # Caddy's built-in retry uses exponential backoff that gets very slow after failures.

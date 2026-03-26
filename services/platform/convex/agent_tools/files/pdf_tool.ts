@@ -38,6 +38,8 @@ export const pdfTool = {
   tool: createTool({
     description: `PDF tool for generating, downloading, and parsing PDF documents.
 
+IMPORTANT: Only call the "generate" operation when the user explicitly requests creating or exporting a PDF file. Do NOT proactively generate PDFs unless the user specifically asks for this format.
+
 OPERATIONS:
 
 1. generate - Generate a PDF from Markdown/HTML, or download/capture a PDF from a URL
@@ -71,9 +73,12 @@ EXAMPLES:
 • Download existing PDF: { "operation": "generate", "fileName": "report", "sourceType": "url", "content": "https://example.com/report.pdf" }
 • Parse: { "operation": "parse", "fileId": "kg2bazp7...", "filename": "report.pdf", "user_input": "Summarize the key findings" }
 
-AFTER GENERATING: The file automatically appears as a download card in the chat. Do NOT mention downloading, do NOT include a link, and do NOT say "you can download it" — the card handles this. To also save the file to a folder in the documents hub, call document_write with the returned fileStorageId and the desired folderPath.
+AFTER GENERATING: Check the downloadUrl in the result:
+- If it says "[file card shown in chat]": the file is already visible as a download card. Do NOT mention downloading, do NOT include a link, and do NOT say "you can download it" — the card handles this.
+- If it contains an actual URL: no download card was shown. You MUST include the URL as a clickable markdown link so the user can download the file.
+To also save the file to a folder in the documents hub, call document_write with the returned fileStorageId and the desired folderPath.
 `,
-    args: z.discriminatedUnion('operation', [
+    inputSchema: z.discriminatedUnion('operation', [
       z.object({
         operation: z.literal('generate'),
         fileName: z
@@ -129,7 +134,7 @@ AFTER GENERATING: The file automatically appears as a download card in the chat.
           .describe("The user's question or instruction about the PDF content"),
       }),
     ]),
-    handler: async (ctx: ToolCtx, args): Promise<PdfResult> => {
+    execute: async (ctx: ToolCtx, args): Promise<PdfResult> => {
       if (args.operation === 'parse') {
         const model = getAgentModelId(ctx);
         const result = await parseFile(

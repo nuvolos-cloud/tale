@@ -27,7 +27,13 @@ vi.mock('../../_generated/server', async (importOriginal) => {
 });
 
 vi.mock('../../_generated/api', () => ({
-  internal: {},
+  internal: {
+    documents: {
+      internal_actions: {
+        extractDocumentDates: 'extractDocumentDates',
+      },
+    },
+  },
 }));
 
 const mockGetAuthUser = vi.fn();
@@ -87,6 +93,9 @@ function createMockCtx() {
       get: vi.fn().mockResolvedValue(null),
       insert: vi.fn().mockResolvedValue('fm_new'),
       patch: vi.fn().mockResolvedValue(undefined),
+    },
+    scheduler: {
+      runAfter: vi.fn().mockResolvedValue(undefined),
     },
   };
 }
@@ -234,6 +243,37 @@ describe('createDocumentFromUpload', () => {
     await handler(ctx, argsWithoutSize);
 
     expect(ctx.db.patch).not.toHaveBeenCalled();
+  });
+
+  it('schedules extractDocumentDates for PDF uploads', async () => {
+    mockGetAuthUser.mockResolvedValue(AUTH_USER);
+    const ctx = createMockCtx();
+    const handler = await getHandler();
+
+    await handler(ctx, baseArgs);
+
+    expect(ctx.scheduler.runAfter).toHaveBeenCalledWith(
+      0,
+      'extractDocumentDates',
+      {
+        documentId: 'doc_created',
+        fileId: 'storage_1',
+      },
+    );
+  });
+
+  it('does not schedule extractDocumentDates for TXT uploads', async () => {
+    mockGetAuthUser.mockResolvedValue(AUTH_USER);
+    const ctx = createMockCtx();
+    const handler = await getHandler();
+
+    await handler(ctx, {
+      ...baseArgs,
+      fileName: 'notes.txt',
+      contentType: 'text/plain',
+    });
+
+    expect(ctx.scheduler.runAfter).not.toHaveBeenCalled();
   });
 
   it('inherits teamId from folder', async () => {
