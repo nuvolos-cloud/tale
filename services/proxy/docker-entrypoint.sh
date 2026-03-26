@@ -24,9 +24,22 @@ fi
 SITE_URL=$(echo "${SITE_URL}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 export SITE_URL
 
+# Base path for subpath deployments (from .env, e.g., /test or /app)
+# Strip trailing slashes, ensure leading slash if non-empty, strip SITE_URL trailing slash
+BASE_PATH=$(echo "${BASE_PATH:-}" | sed 's|/\+$||')
+if [ -n "$BASE_PATH" ] && [ "${BASE_PATH#/}" = "$BASE_PATH" ]; then
+  BASE_PATH="/${BASE_PATH}"
+fi
+SITE_URL=$(echo "${SITE_URL}" | sed 's|/\+$||')
+export BASE_PATH
+export SITE_URL
+
 echo "Domain Configuration:"
 echo "  HOST: ${HOST}"
 echo "  SITE_URL: ${SITE_URL}"
+if [ -n "$BASE_PATH" ]; then
+  echo "  BASE_PATH: ${BASE_PATH}"
+fi
 
 # Source and destination for Caddyfile
 # We copy to /config (writable volume) because /etc/caddy is read-only in the image
@@ -41,52 +54,38 @@ CADDYFILE="/config/Caddyfile"
 echo "TLS Configuration:"
 echo "  TLS_MODE: ${TLS_MODE:-selfsigned}"
 
-case "${TLS_MODE:-selfsigned}" in
-    external)
-      echo "  Mode: External (TLS handled by reverse proxy, Caddy serves HTTP only)"
-      TLS_CONFIG=""
-      ;;
+# Copy Caddyfile to writable location, then apply TLS config
+cp "$CADDYFILE_SRC" "$CADDYFILE"
+
+if echo "${SITE_URL}" | grep -qi '^http://' || [ "${TLS_MODE:-selfsigned}" = "none" ]; then
+  # Plain HTTP mode — remove the TLS directive line entirely.
+  # Two cases:
+  #   SITE_URL=http://...      — fully local dev, no external proxy
+  #   TLS_MODE=none            — behind an external TLS-terminating reverse proxy
+  #                              (SITE_URL is https:// but Caddy listens on plain HTTP)
+  echo "  Mode: Plain HTTP (no TLS)"
+  sed -i "/TLS_PLACEHOLDER/d" "$CADDYFILE"
+else
+  case "${TLS_MODE:-selfsigned}" in
     letsencrypt)
       echo "  Mode: Let's Encrypt (ACME - trusted certificates)"
       if [ -n "${TLS_EMAIL:-}" ]; then
         echo "  Email: ${TLS_EMAIL}"
-        # ACME with email for notifications
         TLS_CONFIG="tls ${TLS_EMAIL}"
       else
         echo "  Warning: TLS_EMAIL not set, certificate expiry notifications disabled"
-        # ACME without email
         TLS_CONFIG="tls"
       fi
       ;;
     selfsigned|*)
       echo "  Mode: Self-signed (internal CA - browser warning expected)"
       echo "  To trust certs on host: docker exec tale-proxy caddy trust"
-      # Internal CA for self-signed certificates
       TLS_CONFIG="tls internal"
       ;;
   esac
-
-# HTTPS is required for non-external modes — OAuth providers reject http://
-# callbacks and crypto.subtle is unavailable in insecure contexts.
-if [ "${TLS_MODE:-selfsigned}" != "external" ] && echo "${SITE_URL}" | grep -qi '^http://'; then
-  echo "Error: SITE_URL must use https://. Plain HTTP is not supported." >&2
-  echo "  If running behind a TLS-terminating reverse proxy, set TLS_MODE=external." >&2
-  exit 1
+  sed -i "s|.*TLS_PLACEHOLDER.*|\\t${TLS_CONFIG}|" "$CADDYFILE"
+  echo "  Caddyfile configured: ${TLS_CONFIG}"
 fi
-
-# Copy Caddyfile to writable location and apply TLS config
-cp "$CADDYFILE_SRC" "$CADDYFILE"
-sed -i "s|.*TLS_PLACEHOLDER.*|\\t${TLS_CONFIG}|" "$CADDYFILE"
-
-# For external mode, force Caddy to listen on HTTP by rewriting the scheme.
-# SITE_URL stays as-is for the platform (public URL), but Caddy must not auto-enable TLS.
-if [ "${TLS_MODE:-selfsigned}" = "external" ]; then
-  CADDY_ADDR=$(echo "${SITE_URL}" | sed 's|^https://|http://|')
-  sed -i "s|{[\$]SITE_URL:[^}]*}|${CADDY_ADDR}|" "$CADDYFILE"
-  echo "  Caddy listen address: ${CADDY_ADDR}"
-fi
-
-echo "  Caddyfile configured: ${TLS_CONFIG:-none}"
 
 # Function to fix certificate permissions after Caddy generates them
 fix_cert_permissions() {

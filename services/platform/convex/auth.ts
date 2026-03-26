@@ -1,7 +1,7 @@
 import { createClient, type GenericCtx } from '@convex-dev/better-auth';
 import { convex } from '@convex-dev/better-auth/plugins';
 import { betterAuth } from 'better-auth';
-import { apiKey, organization } from 'better-auth/plugins';
+import { apiKey, auth0, genericOAuth, organization } from 'better-auth/plugins';
 import { createAccessControl } from 'better-auth/plugins/access';
 import {
   defaultStatements,
@@ -9,6 +9,7 @@ import {
 } from 'better-auth/plugins/organization/access';
 
 import { isRecord, getString } from '../lib/utils/type-guards';
+import { provisionAuth0User } from './betterAuth/provision_auth0_user';
 import { components } from './_generated/api';
 import { DataModel } from './_generated/dataModel';
 import authConfig from './auth.config';
@@ -220,6 +221,15 @@ export const getAuthOptions = (ctx: GenericCtx<DataModel>) => {
     baseURL: siteUrl,
     trustedOrigins: [new URL(siteUrl).origin],
     database: authComponent.adapter(ctx),
+    databaseHooks: {
+      session: {
+        create: {
+          after: async (session: { userId: string }) => {
+            await provisionAuth0User(ctx, session.userId);
+          },
+        },
+      },
+    },
     // Configure simple, non-verified email/password to get started
     emailAndPassword: {
       enabled: true,
@@ -231,6 +241,18 @@ export const getAuthOptions = (ctx: GenericCtx<DataModel>) => {
       cookiePrefix: 'better-auth',
       // Force secure cookies when running over HTTPS (this adds __Secure- prefix automatically)
       useSecureCookies: isHttps,
+      // SameSite=None is required for cross-origin iframe embedding (e.g. Nuvolos).
+      // Only applied over HTTPS — browsers silently reject SameSite=None on plain HTTP.
+      ...(isHttps && {
+        cookies: {
+          sessionToken: {
+            attributes: {
+              sameSite: 'none' as const,
+              secure: true,
+            },
+          },
+        },
+      }),
     },
     session: {
       additionalFields: {
@@ -284,6 +306,19 @@ export const getAuthOptions = (ctx: GenericCtx<DataModel>) => {
           maxRequests: 100,
         },
       }),
+      ...(process.env.AUTH0_DOMAIN
+        ? [
+            genericOAuth({
+              config: [
+                auth0({
+                  clientId: process.env.AUTH0_CLIENT_ID!,
+                  clientSecret: process.env.AUTH0_CLIENT_SECRET!,
+                  domain: process.env.AUTH0_DOMAIN,
+                }),
+              ],
+            }),
+          ]
+        : []),
     ],
   };
 };

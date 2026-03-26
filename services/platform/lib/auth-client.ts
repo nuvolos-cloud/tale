@@ -1,5 +1,9 @@
 import { convexClient } from '@convex-dev/better-auth/client/plugins';
-import { apiKeyClient, organizationClient } from 'better-auth/client/plugins';
+import {
+  apiKeyClient,
+  genericOAuthClient,
+  organizationClient,
+} from 'better-auth/client/plugins';
 import { createAccessControl } from 'better-auth/plugins/access';
 import { createAuthClient } from 'better-auth/react';
 
@@ -32,12 +36,16 @@ const member = ac.newRole({
 });
 const disabled = ac.newRole({ content: [] });
 
+const basePath = window.__ENV__?.BASE_PATH ?? '';
+
 export const authClient = createAuthClient({
-  // Requests are same-origin via proxy rewrites; no crossDomain client needed
-  // baseURL: appUrl,
+  baseURL: basePath
+    ? `${window.location.origin}${basePath}/api/auth`
+    : undefined,
   plugins: [
     convexClient(),
     apiKeyClient(),
+    genericOAuthClient(),
     organizationClient({
       ac,
       roles: {

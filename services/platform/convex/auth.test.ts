@@ -13,7 +13,13 @@ vi.mock('better-auth', () => ({
 
 vi.mock('better-auth/plugins', () => ({
   apiKey: vi.fn(() => ({})),
+  auth0: vi.fn(() => ({})),
+  genericOAuth: vi.fn(() => ({})),
   organization: vi.fn(() => ({})),
+}));
+
+vi.mock('./betterAuth/provision_auth0_user', () => ({
+  provisionAuth0User: vi.fn(),
 }));
 
 vi.mock('better-auth/plugins/access', () => ({
