@@ -21,7 +21,7 @@ const siteUrl = process.env.SITE_URL || 'http://127.0.0.1:3000';
 // Centralize table-keyed permissions used by RLS and the org plugin
 // Only includes resources that exist in schema.ts
 const platformResourceStatements = {
-  customAgents: ['read', 'write'],
+  agents: ['read', 'write'],
   documents: ['read', 'write'],
   products: ['read', 'write'],
   customers: ['read', 'write'],
@@ -30,9 +30,9 @@ const platformResourceStatements = {
   onedriveSyncConfigs: ['read', 'write'],
   conversations: ['read', 'write'],
   conversationMessages: ['read', 'write'],
-  wfDefinitions: ['read', 'write'],
-  wfStepDefs: ['read', 'write'],
-  wfStepAuditLogs: ['read', 'write'],
+  wfDefinitions: ['read', 'write'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepDefs: ['read', 'write'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepAuditLogs: ['read', 'write'], // @deprecated — DB table deprecated; permission for legacy data access only
   wfExecutions: ['read', 'write'],
   approvals: ['read', 'write'],
   websites: ['read', 'write'],
@@ -50,7 +50,7 @@ const ac = createAccessControl(platformStatements);
 const admin = ac.newRole({
   ...adminAc.statements,
 
-  customAgents: ['read', 'write'],
+  agents: ['read', 'write'],
   documents: ['read', 'write'],
   products: ['read', 'write'],
   customers: ['read', 'write'],
@@ -59,9 +59,9 @@ const admin = ac.newRole({
   onedriveSyncConfigs: ['read', 'write'],
   conversations: ['read', 'write'],
   conversationMessages: ['read', 'write'],
-  wfDefinitions: ['read', 'write'],
-  wfStepDefs: ['read', 'write'],
-  wfStepAuditLogs: ['read', 'write'],
+  wfDefinitions: ['read', 'write'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepDefs: ['read', 'write'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepAuditLogs: ['read', 'write'], // @deprecated — DB table deprecated; permission for legacy data access only
   wfExecutions: ['read', 'write'],
   workflowProcessingRecords: ['read', 'write'],
   approvals: ['read', 'write'],
@@ -70,7 +70,7 @@ const admin = ac.newRole({
 });
 
 const developer = ac.newRole({
-  customAgents: ['read', 'write'],
+  agents: ['read', 'write'],
   documents: ['read', 'write'],
   products: ['read', 'write'],
   customers: ['read', 'write'],
@@ -79,9 +79,9 @@ const developer = ac.newRole({
   onedriveSyncConfigs: ['read', 'write'],
   conversations: ['read', 'write'],
   conversationMessages: ['read', 'write'],
-  wfDefinitions: ['read', 'write'],
-  wfStepDefs: ['read', 'write'],
-  wfStepAuditLogs: ['read', 'write'],
+  wfDefinitions: ['read', 'write'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepDefs: ['read', 'write'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepAuditLogs: ['read', 'write'], // @deprecated — DB table deprecated; permission for legacy data access only
   wfExecutions: ['read', 'write'],
   workflowProcessingRecords: ['read', 'write'],
   approvals: ['read', 'write'],
@@ -90,7 +90,7 @@ const developer = ac.newRole({
 });
 
 const editor = ac.newRole({
-  customAgents: ['read', 'write'],
+  agents: ['read', 'write'],
   documents: ['read', 'write'],
   products: ['read', 'write'],
   customers: ['read', 'write'],
@@ -100,9 +100,9 @@ const editor = ac.newRole({
   onedriveSyncConfigs: ['read'],
   conversations: ['read', 'write'],
   conversationMessages: ['read', 'write'],
-  wfDefinitions: ['read'],
-  wfStepDefs: ['read'],
-  wfStepAuditLogs: ['read'],
+  wfDefinitions: ['read'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepDefs: ['read'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepAuditLogs: ['read'], // @deprecated — DB table deprecated; permission for legacy data access only
   wfExecutions: ['read'],
   workflowProcessingRecords: ['read'],
   approvals: ['read', 'write'],
@@ -112,7 +112,7 @@ const editor = ac.newRole({
 });
 
 const member = ac.newRole({
-  customAgents: ['read'],
+  agents: ['read'],
   documents: ['read'],
   products: ['read'],
   customers: ['read'],
@@ -121,9 +121,9 @@ const member = ac.newRole({
   onedriveSyncConfigs: ['read'],
   conversations: ['read'],
   conversationMessages: ['read'],
-  wfDefinitions: ['read'],
-  wfStepDefs: ['read'],
-  wfStepAuditLogs: ['read'],
+  wfDefinitions: ['read'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepDefs: ['read'], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepAuditLogs: ['read'], // @deprecated — DB table deprecated; permission for legacy data access only
   wfExecutions: ['read'],
   workflowProcessingRecords: ['read'],
   approvals: ['read'],
@@ -133,7 +133,7 @@ const member = ac.newRole({
 });
 
 const disabled = ac.newRole({
-  customAgents: [],
+  agents: [],
   documents: [],
   products: [],
   customers: [],
@@ -142,9 +142,9 @@ const disabled = ac.newRole({
   onedriveSyncConfigs: [],
   conversations: [],
   conversationMessages: [],
-  wfDefinitions: [],
-  wfStepDefs: [],
-  wfStepAuditLogs: [],
+  wfDefinitions: [], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepDefs: [], // @deprecated — DB table deprecated; permission for legacy data access only
+  wfStepAuditLogs: [], // @deprecated — DB table deprecated; permission for legacy data access only
   wfExecutions: [],
   workflowProcessingRecords: [],
   approvals: [],

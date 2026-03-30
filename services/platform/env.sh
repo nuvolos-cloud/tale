@@ -20,7 +20,11 @@ env_normalize_common() {
 	  # This allows the platform to work with self-hosted PostgreSQL by default
 	  if [ -z "${POSTGRES_URL:-}" ]; then
 	    local db_user="${DB_USER:-tale}"
-	    local db_password="${DB_PASSWORD:-tale_password_change_me}"
+	    if [ -z "${DB_PASSWORD:-}" ]; then
+	      echo "ERROR: DB_PASSWORD or POSTGRES_URL must be set" >&2
+	      exit 1
+	    fi
+	    local db_password="${DB_PASSWORD}"
 	    local db_host="${DB_HOST:-db}"
 	    local db_port="${DB_PORT:-5432}"
 	    # Convex backend for postgres-v5 expects URL without database name in path
@@ -42,7 +46,6 @@ env_normalize_common() {
 	  # They can be overridden via environment variables in .env when needed.
 	  export RAG_URL="${RAG_URL:-http://rag:8001}"
 	  export CRAWLER_URL="${CRAWLER_URL:-http://crawler:8002}"
-	  export OPERATOR_URL="${OPERATOR_URL:-http://operator:8004}"
 	  export SEARCH_SERVICE_URL="${SEARCH_SERVICE_URL:-http://search:8080}"
 
 	  # Convex instance configuration
@@ -50,6 +53,11 @@ env_normalize_common() {
 	  # This matches the database name created in init-scripts/02-create-convex-database.sql
 	  export INSTANCE_NAME="tale_platform"
 	  export INSTANCE_SECRET="${INSTANCE_SECRET}"
+
+  # Filesystem directories for file-based configs
+  export AGENTS_DIR="${AGENTS_DIR:-/app/data/agents}"
+  export WORKFLOWS_DIR="${WORKFLOWS_DIR:-/app/data/workflows}"
+  export INTEGRATIONS_DIR="${INTEGRATIONS_DIR:-/app/data/integrations}"
 
   # AI provider keys
   export OPENAI_API_KEY="${OPENAI_API_KEY}"
