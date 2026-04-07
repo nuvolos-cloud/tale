@@ -76,7 +76,7 @@
     "groups": [
       {
         "group": "Getting started",
-        "pages": ["overview", "quickstart", "production-deployment"]
+        "pages": ["overview", "quickstart", "ai-assisted-development", "production-deployment"]
       },
       {
         "group": "Features",
@@ -100,8 +100,13 @@
           "api-reference",
           "environment-reference",
           "operations",
+          "container-architecture",
           "troubleshooting"
         ]
+      },
+      {
+        "group": "Contributing",
+        "pages": ["contributing-docker"]
       }
     ]
   },
@@ -137,6 +142,17 @@
             "href": "/environment-reference"
           },
           { "label": "Troubleshooting", "href": "/troubleshooting" }
+        ]
+      },
+      {
+        "header": "Legal",
+        "items": [
+          { "label": "Privacy policy", "href": "/privacy-policy" },
+          { "label": "Terms of service", "href": "/terms-of-service" },
+          {
+            "label": "Data processing agreement",
+            "href": "/data-processing-agreement"
+          }
         ]
       }
     ]

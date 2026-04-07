@@ -101,7 +101,7 @@ afterEach(() => {
 });
 
 describe('DashboardLayout', () => {
-  it('shows spinner when Convex auth is loading', () => {
+  it('renders outlet when Convex auth is loading', () => {
     mockUseConvexAuth.mockReturnValue({
       isLoading: true,
       isAuthenticated: false,
@@ -114,11 +114,10 @@ describe('DashboardLayout', () => {
 
     render(<DashboardLayout />);
 
-    expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(screen.queryByTestId('outlet')).not.toBeInTheDocument();
+    expect(screen.getByTestId('outlet')).toBeInTheDocument();
   });
 
-  it('shows spinner when member context query is loading', () => {
+  it('renders outlet when member context query is loading', () => {
     mockUseConvexAuth.mockReturnValue({
       isLoading: false,
       isAuthenticated: true,
@@ -131,11 +130,10 @@ describe('DashboardLayout', () => {
 
     render(<DashboardLayout />);
 
-    expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(screen.queryByTestId('outlet')).not.toBeInTheDocument();
+    expect(screen.getByTestId('outlet')).toBeInTheDocument();
   });
 
-  it('shows spinner when both auth and query are loading', () => {
+  it('renders outlet when both auth and query are loading', () => {
     mockUseConvexAuth.mockReturnValue({
       isLoading: true,
       isAuthenticated: false,
@@ -148,8 +146,7 @@ describe('DashboardLayout', () => {
 
     render(<DashboardLayout />);
 
-    expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(screen.queryByTestId('outlet')).not.toBeInTheDocument();
+    expect(screen.getByTestId('outlet')).toBeInTheDocument();
   });
 
   it('renders child routes when auth complete and member has role', () => {
@@ -158,7 +155,12 @@ describe('DashboardLayout', () => {
       isAuthenticated: true,
     });
     mockUseCurrentMemberContext.mockReturnValue({
-      data: { role: 'admin', memberId: 'm1', organizationId: 'org-1' },
+      data: {
+        status: 'ok',
+        role: 'admin',
+        memberId: 'm1',
+        organizationId: 'org-1',
+      },
       isLoading: false,
       isError: false,
     });
@@ -169,13 +171,13 @@ describe('DashboardLayout', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('shows access denied when auth complete but no role', () => {
+  it('shows access denied when user is not a member', () => {
     mockUseConvexAuth.mockReturnValue({
       isLoading: false,
       isAuthenticated: true,
     });
     mockUseCurrentMemberContext.mockReturnValue({
-      data: null,
+      data: { status: 'not_member' },
       isLoading: false,
       isError: false,
     });
@@ -184,7 +186,26 @@ describe('DashboardLayout', () => {
 
     expect(screen.getByText('accessDenied.noMembership')).toBeInTheDocument();
     expect(screen.queryByTestId('outlet')).not.toBeInTheDocument();
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('shows not-found when organization does not exist', () => {
+    mockUseConvexAuth.mockReturnValue({
+      isLoading: false,
+      isAuthenticated: true,
+    });
+    mockUseCurrentMemberContext.mockReturnValue({
+      data: { status: 'not_found' },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<DashboardLayout />);
+
+    expect(screen.getByText('common.notFound.title')).toBeInTheDocument();
+    expect(
+      screen.getByText('accessDenied.workspaceNotFound'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('outlet')).not.toBeInTheDocument();
   });
 
   it('passes organizationId from route params to useCurrentMemberContext', () => {
@@ -236,7 +257,7 @@ describe('DashboardLayout', () => {
     expect(mockUseCurrentMemberContext.mock.calls[0]?.[1]).toBe(false);
   });
 
-  it('shows spinner when query errors (not access denied)', () => {
+  it('renders outlet when query errors (treats error as loading)', () => {
     mockUseConvexAuth.mockReturnValue({
       isLoading: false,
       isAuthenticated: true,
@@ -249,8 +270,7 @@ describe('DashboardLayout', () => {
 
     render(<DashboardLayout />);
 
-    expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(screen.queryByTestId('outlet')).not.toBeInTheDocument();
+    expect(screen.getByTestId('outlet')).toBeInTheDocument();
     expect(
       screen.queryByText('accessDenied.noMembership'),
     ).not.toBeInTheDocument();
@@ -262,7 +282,12 @@ describe('DashboardLayout', () => {
       isAuthenticated: true,
     });
     mockUseCurrentMemberContext.mockReturnValue({
-      data: { role: 'admin', memberId: 'm1', organizationId: 'org-1' },
+      data: {
+        status: 'ok',
+        role: 'admin',
+        memberId: 'm1',
+        organizationId: 'org-1',
+      },
       isLoading: false,
       isError: true,
     });

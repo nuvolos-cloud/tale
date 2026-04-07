@@ -8,13 +8,16 @@
  * History snapshots use epoch-ms filenames with 100-entry retention.
  */
 
-import { v } from 'convex/values';
+import { ConvexError, v } from 'convex/values';
 import { mkdir, readdir, rm, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
+import type { SerializableAgentConfig } from '../lib/agent_chat/types';
 import type { AgentJsonConfig, AgentReadResult } from './file_utils';
 
+import { PROTECTED_AGENT_NAMES } from '../../lib/shared/constants/agents';
 import { agentJsonSchema } from '../../lib/shared/schemas/agents';
+import { internal } from '../_generated/api';
 import { action, internalAction } from '../_generated/server';
 import { authComponent } from '../auth';
 import {
@@ -102,10 +105,11 @@ export const listAgents = action({
             displayName: result.config.displayName,
             description: result.config.description,
             visibleInChat: result.config.visibleInChat,
-            modelPreset: result.config.modelPreset,
+            supportedModels: result.config.supportedModels,
             toolNames: result.config.toolNames,
             roleRestriction: result.config.roleRestriction,
             conversationStarters: result.config.conversationStarters,
+            i18n: result.config.i18n,
           };
         }
         return {
@@ -125,6 +129,7 @@ export const saveAgent = action({
     orgSlug: v.string(),
     agentName: v.string(),
     config: v.any(),
+    isNew: v.optional(v.boolean()),
   },
   returns: v.object({ hash: v.string() }),
   handler: async (ctx, args): Promise<{ hash: string }> => {
@@ -139,24 +144,17 @@ export const saveAgent = action({
     const content = serializeAgentJson(config);
     const filePath = resolveAgentFilePath(args.orgSlug, args.agentName);
 
-    // Write new data FIRST (critical path)
+    if (args.isNew) {
+      const existing = await readFileSafe(filePath);
+      if (existing !== null) {
+        throw new ConvexError({
+          code: 'DUPLICATE_NAME',
+          message: `Agent '${args.agentName}' already exists`,
+        });
+      }
+    }
+
     await atomicWrite(filePath, content);
-
-    // Snapshot previous state to history SECOND (best-effort)
-    // Note: we snapshot the NEW content as a history record of this save.
-    // The actual "previous" content was the file before this write.
-    // For simplicity, we read back what we just wrote — the caller should
-    // pass the previous content if they want true pre-save snapshots.
-    // In practice, the UI sends the full new config, so we snapshot the
-    // file that existed before by reading it before writing.
-    // Let's fix the order: snapshot first, then write.
-
-    // Actually, per review findings: write first, snapshot second.
-    // The snapshot is of the PREVIOUS file content, but since we already
-    // overwrote it, we need a different approach.
-    // The correct flow: the caller reads current state before editing,
-    // so the UI holds the "before" state. We just write the new state.
-    // History is created by snapshotToHistory action called separately.
 
     return { hash: sha256(content) };
   },
@@ -247,6 +245,10 @@ export const deleteAgent = action({
   handler: async (ctx, args): Promise<null> => {
     const authUser = await authComponent.getAuthUser(ctx);
     if (!authUser) throw new Error('Unauthenticated');
+
+    if ((PROTECTED_AGENT_NAMES as readonly string[]).includes(args.agentName)) {
+      throw new Error(`Agent '${args.agentName}' cannot be deleted`);
+    }
 
     const filePath = resolveAgentFilePath(args.orgSlug, args.agentName);
     const historyDir = resolveHistoryDir(args.orgSlug, args.agentName);
@@ -378,5 +380,83 @@ export const readAgentForChat = internalAction({
   returns: v.any(),
   handler: async (_ctx, args): Promise<AgentReadResult> => {
     return readAgentFile(args.orgSlug, args.agentName);
+  },
+});
+
+/**
+ * Read agent config from filesystem, fetch DB binding, and return
+ * a fully resolved SerializableAgentConfig ready for the agent pipeline.
+ *
+ * This centralizes the read-parse-convert pattern so callers don't need
+ * Node.js filesystem access.
+ */
+export const resolveAgentConfig = internalAction({
+  args: {
+    orgSlug: v.string(),
+    agentSlug: v.string(),
+    organizationId: v.string(),
+    modelId: v.optional(v.string()),
+  },
+  returns: v.any(),
+  handler: async (ctx, args): Promise<SerializableAgentConfig> => {
+    const result = await readAgentFile(args.orgSlug, args.agentSlug);
+    if (!result.ok) {
+      throw new Error(`Agent not found: ${args.agentSlug} — ${result.message}`);
+    }
+
+    const binding = await ctx.runQuery(
+      internal.agents.internal_queries.getBindingByAgent,
+      {
+        organizationId: args.organizationId,
+        agentSlug: args.agentSlug,
+      },
+    );
+
+    const { toSerializableConfig } = await import('./config');
+    const config = toSerializableConfig(
+      args.agentSlug,
+      result.config,
+      binding
+        ? {
+            teamId: binding.teamId ?? undefined,
+            knowledgeFiles: binding.knowledgeFiles ?? undefined,
+          }
+        : undefined,
+    );
+
+    // Apply model override if requested and allowed by agent's supportedModels
+    if (args.modelId && result.config.supportedModels.includes(args.modelId)) {
+      config.model = args.modelId;
+    }
+
+    return config;
+  },
+});
+
+// ---------------------------------------------------------------------------
+// AI-assisted translation for agent content fields
+// ---------------------------------------------------------------------------
+
+export const translateAgentFields = action({
+  args: {
+    fields: v.record(v.string(), v.union(v.string(), v.array(v.string()))),
+    targetLocale: v.string(),
+  },
+  returns: v.object({
+    translated: v.record(v.string(), v.union(v.string(), v.array(v.string()))),
+    error: v.optional(v.string()),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    translated: Record<string, string | string[]>;
+    error?: string;
+  }> => {
+    const authUser = await authComponent.getAuthUser(ctx);
+    if (!authUser) throw new Error('Unauthenticated');
+
+    const { translateFields } = await import('./translate_fields');
+    return translateFields(ctx, args);
   },
 });

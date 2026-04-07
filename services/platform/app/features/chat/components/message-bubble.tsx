@@ -4,9 +4,9 @@ import {
   CopyIcon,
   CheckIcon,
   Info,
-  Square,
   TriangleAlert,
   RotateCcw,
+  Square,
 } from 'lucide-react';
 import {
   ComponentPropsWithoutRef,
@@ -104,9 +104,10 @@ function MessageBubbleComponent({
   const isAssistantStreaming =
     message.role === 'assistant' && message.isStreaming;
 
-  const sanitizedContent = message.content
-    ? message.content.replace(/\|\|+/g, '|')
-    : '';
+  const displayContent = message.content ?? '';
+  // Only normalize pipes for assistant messages (markdown table rendering);
+  // user messages must be rendered verbatim to preserve content integrity.
+  const assistantContent = displayContent.replace(/\|\|+/g, '|');
 
   const [isCopied, setIsCopied] = useState(false);
   const [isInfoDialogOpen, setIsInfoDialogOpen] = useState(false);
@@ -149,7 +150,7 @@ function MessageBubbleComponent({
     setIsOverflowing(
       contentRef.current.scrollHeight > contentRef.current.clientHeight,
     );
-  }, [isUser, isExpanded, sanitizedContent]);
+  }, [isUser, isExpanded, displayContent]);
 
   // Debounced ResizeObserver for subsequent resize events (e.g. window resize).
   useEffect(() => {
@@ -167,7 +168,7 @@ function MessageBubbleComponent({
       cancelAnimationFrame(frameId);
       observer.disconnect();
     };
-  }, [isUser, isExpanded, sanitizedContent]);
+  }, [isUser, isExpanded, displayContent]);
 
   useEffect(() => {
     return () => {
@@ -209,7 +210,7 @@ function MessageBubbleComponent({
             : 'text-foreground bg-background'
         }`}
       >
-        {sanitizedContent ? (
+        {displayContent ? (
           <div className="text-sm leading-5">
             <div
               ref={isUser ? contentRef : undefined}
@@ -217,11 +218,17 @@ function MessageBubbleComponent({
                 isUser && !isExpanded && 'max-h-96 overflow-hidden',
               )}
             >
-              <StructuredMessage
-                text={sanitizedContent}
-                isStreaming={!!isAssistantStreaming}
-                onSendFollowUp={!isUser ? onSendFollowUp : undefined}
-              />
+              {isUser ? (
+                <p className="break-words whitespace-pre-wrap">
+                  {displayContent}
+                </p>
+              ) : (
+                <StructuredMessage
+                  text={assistantContent}
+                  isStreaming={!!isAssistantStreaming}
+                  onSendFollowUp={onSendFollowUp}
+                />
+              )}
             </div>
             {isUser && (isOverflowing || isExpanded) && (
               <div className="flex justify-end">
@@ -246,9 +253,11 @@ function MessageBubbleComponent({
                     {tChat('errorGenerating')}
                   </span>
                 </div>
-                <p className="text-muted-foreground text-[13px]">
-                  {tChat('errorGeneratingDescription')}
-                </p>
+                {message.error && (
+                  <p className="text-muted-foreground text-[13px] break-all whitespace-pre-wrap">
+                    {message.error}
+                  </p>
+                )}
                 {onRetry && (
                   <Button
                     variant="secondary"
@@ -264,12 +273,40 @@ function MessageBubbleComponent({
             )}
           </div>
         ) : (
-          message.isAborted && (
+          message.isAborted &&
+          (message.error ? (
+            <div
+              className="mt-3 flex flex-col gap-2"
+              role="alert"
+              aria-live="polite"
+            >
+              <div className="text-destructive flex items-center gap-2">
+                <TriangleAlert className="size-4 shrink-0" />
+                <span className="text-sm font-medium">
+                  {tChat('errorGenerating')}
+                </span>
+              </div>
+              <p className="text-muted-foreground text-[13px] break-all whitespace-pre-wrap">
+                {message.error}
+              </p>
+              {onRetry && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="text-foreground w-fit gap-1.5 rounded-lg border-[#E5E7EB] bg-transparent px-3 py-1.5 text-[13px] font-medium"
+                  onClick={onRetry}
+                >
+                  <RotateCcw className="size-3.5" />
+                  {tChat('retryGeneration')}
+                </Button>
+              )}
+            </div>
+          ) : (
             <div className="text-muted-foreground flex items-center gap-1.5 text-sm italic">
               <Square className="size-3" />
               {tChat('generationStopped')}
             </div>
-          )
+          ))
         )}
 
         {message.fileParts && message.fileParts.length > 0 && (
@@ -305,7 +342,7 @@ function MessageBubbleComponent({
             })}
           </div>
         )}
-        {!isUser && !isAssistantStreaming && !!sanitizedContent && (
+        {!isUser && !isAssistantStreaming && !!displayContent && (
           <div className="flex items-center pt-2">
             <Tooltip
               content={isCopied ? t('actions.copied') : t('actions.copy')}

@@ -25,13 +25,22 @@ Tale uses OpenRouter as its default AI gateway, which gives you access to hundre
 
 ### Step 1: Install the CLI
 
+**Linux / macOS:**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tale-project/tale/main/scripts/install-cli.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/tale-project/tale/main/scripts/install-cli.ps1 | iex
 ```
 
 Or download the binary directly from [GitHub Releases](https://github.com/tale-project/tale/releases):
 
 ```bash
+# Linux
 curl -fsSL https://github.com/tale-project/tale/releases/latest/download/tale_linux \
   -o /usr/local/bin/tale
 chmod +x /usr/local/bin/tale
@@ -45,6 +54,8 @@ cd my-project
 ```
 
 The CLI prompts for your domain, API key, and TLS mode. Security secrets (`BETTER_AUTH_SECRET`, `ENCRYPTION_SECRET_HEX`) are generated automatically.
+
+> **Tip:** The CLI also generates configuration files for AI-powered editors (Claude Code, Cursor, GitHub Copilot, Windsurf) and extracts the full platform source code to `.tale/reference/`. Open your project in any of these editors to create and edit agents, workflows, and integrations by describing what you want in natural language. See [AI-assisted development](/ai-assisted-development) for details.
 
 ### Step 3: Start Tale
 
@@ -109,7 +120,6 @@ Edit `.env` and fill in the required values:
 
 | Variable | How to fill it in |
 | --- | --- |
-| `OPENAI_API_KEY` | Your OpenRouter (or other provider) API key |
 | `BETTER_AUTH_SECRET` | Generate with: `openssl rand -base64 32` |
 | `ENCRYPTION_SECRET_HEX` | Generate with: `openssl rand -hex 32` |
 | `DB_PASSWORD` | Choose any password for the local database |
@@ -122,4 +132,31 @@ Then build and start:
 docker compose up --build
 ```
 
-The first build takes 3 to 5 minutes. Subsequent starts are much faster.
+Build times vary by service (all 5 services build in ~3 minutes in parallel on a modern system). Subsequent builds are much faster thanks to Docker layer caching.
+
+### Local development with hot-reload
+
+For a faster edit-reload cycle during development, use the development override:
+
+```bash
+docker compose -f compose.yml -f compose.dev.yml up --build
+```
+
+This mounts your local source directories into the containers so changes are reflected immediately without rebuilding images.
+
+### Running container tests
+
+After modifying Dockerfiles or dependencies, validate your changes:
+
+```bash
+# Smoke test: build, start, health check, tear down
+bun run docker:test
+
+# Image validation: OCI labels, secrets, size budgets
+bun run docker:test:image
+
+# Vulnerability scan (requires trivy installed)
+bun run docker:test:vulnerability
+```
+
+See [Contributing Docker guide](/contributing-docker) for more details.

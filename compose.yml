@@ -169,6 +169,7 @@ services:
     # Persist crawler data (website registry + per-site URL databases)
     volumes:
       - crawler-data:/app/data
+      - platform-data:/app/platform-config:ro
 
     # Logging configuration
     logging:
@@ -264,6 +265,7 @@ services:
     # Volume mounts
     volumes:
       - rag-data:/app/data
+      - platform-data:/app/platform-config:ro
 
     # Environment file
     # Create a .env file in the project root with your API keys
@@ -338,6 +340,8 @@ services:
       - caddy-data:/caddy-data:ro
       # Development: mount local agents directory to override defaults
       # - ./examples/agents:/app/data/agents
+      # Development: mount local provider configs
+      # - ./examples/providers:/app/data/providers
 
     # Environment file
     # Create a .env file in the project root with your configuration

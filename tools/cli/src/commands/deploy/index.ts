@@ -6,8 +6,8 @@ import {
   ALL_SERVICES,
   isValidService,
 } from '../../lib/compose/types';
-import { ensureConfig } from '../../lib/config/ensure-config';
 import { ensureEnv } from '../../lib/config/ensure-env';
+import { requireProject } from '../../lib/project/find-project';
 import { selectVersion } from '../../lib/registry/select-version';
 import { loadEnv } from '../../utils/load-env';
 import * as logger from '../../utils/logger';
@@ -27,14 +27,17 @@ export function createDeployCommand(): Command {
       '--fresh',
       'force re-seed builtin agent/workflow/integration configs',
     )
+    .option('-q, --quiet', 'Suppress container logs during deployment')
     .action(async (versionArg: string | undefined, options) => {
       try {
-        const deployDir = await ensureConfig();
-        const envSetupSuccess = await ensureEnv({ deployDir });
+        const projectDir = requireProject();
+        const { success: envSetupSuccess } = await ensureEnv({
+          deployDir: projectDir,
+        });
         if (!envSetupSuccess) {
           process.exit(1);
         }
-        const env = loadEnv(deployDir);
+        const env = loadEnv(projectDir);
 
         let version = versionArg?.replace(/^v/, '');
         if (!version) {
@@ -68,6 +71,7 @@ export function createDeployCommand(): Command {
           dryRun: options.dryRun,
           services,
           fresh: options.fresh,
+          quiet: options.quiet,
         });
       } catch (err) {
         logger.error(err instanceof Error ? err.message : String(err));

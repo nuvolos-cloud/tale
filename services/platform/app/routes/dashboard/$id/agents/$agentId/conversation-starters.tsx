@@ -1,19 +1,25 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Reorder } from 'framer-motion';
-import { ChevronDown, ChevronUp, GripVertical, Plus, X } from 'lucide-react';
-import { useState, useCallback, useEffect } from 'react';
+import { Languages, Loader2, Plus } from 'lucide-react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 
 import { ContentArea } from '@/app/components/layout/content-area';
 import { FormSection } from '@/app/components/ui/forms/form-section';
 import { Input } from '@/app/components/ui/forms/input';
+import { ReorderList } from '@/app/components/ui/forms/reorder-list';
 import { StickySectionHeader } from '@/app/components/ui/layout/sticky-section-header';
+import { LocaleTabs } from '@/app/components/ui/navigation/locale-tabs';
 import { Button } from '@/app/components/ui/primitives/button';
+import { useTranslateAgentFields } from '@/app/features/agents/hooks/mutations';
 import { useAgentConfig } from '@/app/features/agents/hooks/use-agent-config-context';
+import { useOrganization } from '@/app/features/organization/hooks/queries';
+import { useToast } from '@/app/hooks/use-toast';
 import { useT } from '@/lib/i18n/client';
 import {
   MAX_CONVERSATION_STARTER_LENGTH,
   MAX_CONVERSATION_STARTERS,
+  SUPPORTED_AGENT_LOCALES,
 } from '@/lib/shared/constants/agents';
+import { getOrganizationDefaultLocale } from '@/lib/shared/utils/get-organization-default-locale';
 import { seo } from '@/lib/utils/seo';
 
 export const Route = createFileRoute(
@@ -40,28 +46,83 @@ function toStrings(items: StarterItem[]): string[] {
 
 function ConversationStartersTab() {
   const { t } = useT('settings');
+  const { id: organizationId } = Route.useParams();
   const { config, updateConfig } = useAgentConfig();
+  const { data: organization } = useOrganization(organizationId);
+  const translateMutation = useTranslateAgentFields();
+  const { toast } = useToast();
+
+  const defaultLocale = getOrganizationDefaultLocale(organization?.metadata);
+
+  const [editingLocale, setEditingLocale] = useState<string | null>(null);
+
+  const localeTabs = useMemo(() => {
+    const tabs: { locale: string; isDefault: boolean }[] = [];
+    tabs.push({ locale: defaultLocale, isDefault: true });
+    for (const locale of SUPPORTED_AGENT_LOCALES) {
+      if (locale !== defaultLocale) {
+        tabs.push({ locale, isDefault: false });
+      }
+    }
+    return tabs;
+  }, [defaultLocale]);
+
+  const sourceStarters = config.conversationStarters ?? [];
+
+  function getStarters(): string[] {
+    if (editingLocale === null) {
+      return sourceStarters;
+    }
+    const overrides = config.i18n?.[editingLocale]?.conversationStarters ?? [];
+    // Sync slot count with default locale: pad with empty strings or trim to match
+    if (overrides.length < sourceStarters.length) {
+      return [
+        ...overrides,
+        ...Array.from<string>({
+          length: sourceStarters.length - overrides.length,
+        }).fill(''),
+      ];
+    }
+    return overrides.slice(0, sourceStarters.length);
+  }
 
   const [items, setItems] = useState<StarterItem[]>(() =>
-    toItems(config.conversationStarters ?? []),
+    toItems(getStarters()),
   );
 
-  const startersKey = JSON.stringify(config.conversationStarters ?? []);
+  const startersKey = JSON.stringify(getStarters());
   useEffect(() => {
-    setItems(toItems(config.conversationStarters ?? []));
+    setItems(toItems(getStarters()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startersKey]);
+  }, [startersKey, editingLocale]);
 
   const syncToConfig = useCallback(
     (newItems: StarterItem[]) => {
-      const filtered = toStrings(newItems)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      updateConfig({
-        conversationStarters: filtered.length ? filtered : undefined,
-      });
+      if (editingLocale === null) {
+        const filtered = toStrings(newItems)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        updateConfig({
+          conversationStarters: filtered.length ? filtered : undefined,
+        });
+      } else {
+        // For override locales, preserve slot positions (keep empty strings)
+        const strings = toStrings(newItems).map((s) => s.trim());
+        const hasAny = strings.some(Boolean);
+        const existingI18n = config.i18n ?? {};
+        const existingOverrides = existingI18n[editingLocale] ?? {};
+        updateConfig({
+          i18n: {
+            ...existingI18n,
+            [editingLocale]: {
+              ...existingOverrides,
+              conversationStarters: hasAny ? strings : undefined,
+            },
+          },
+        });
+      }
     },
-    [updateConfig],
+    [updateConfig, editingLocale, config.i18n],
   );
 
   const handleChange = useCallback((id: string, value: string) => {
@@ -123,6 +184,51 @@ function ConversationStartersTab() {
     [syncToConfig],
   );
 
+  function hasLocaleContent(locale: string) {
+    const starters = config.i18n?.[locale]?.conversationStarters;
+    return !!starters && starters.length > 0;
+  }
+
+  const canAutoTranslate = editingLocale !== null && sourceStarters.length > 0;
+  const isEditingOverride = editingLocale !== null;
+
+  async function handleAutoTranslate() {
+    if (!editingLocale || sourceStarters.length === 0) return;
+
+    const targetLocale = editingLocale;
+
+    try {
+      const result = await translateMutation.mutateAsync({
+        fields: { conversationStarters: sourceStarters },
+        targetLocale,
+      });
+
+      if (result.error) {
+        toast({
+          title: t('agents.conversationStarters.translateError'),
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const translated = result.translated.conversationStarters;
+      if (!Array.isArray(translated)) return;
+
+      const newItems = toItems(translated);
+
+      if (editingLocale !== targetLocale) return;
+
+      setItems(newItems);
+      syncToConfig(newItems);
+    } catch (error) {
+      console.error('[auto-translate]', error);
+      toast({
+        title: t('agents.conversationStarters.translateError'),
+        variant: 'destructive',
+      });
+    }
+  }
+
   return (
     <ContentArea gap={6} className="mx-auto max-w-3xl px-4 py-4">
       <StickySectionHeader
@@ -130,34 +236,50 @@ function ConversationStartersTab() {
         description={t('agents.conversationStarters.description')}
       />
 
-      <FormSection>
-        <Reorder.Group
-          axis="y"
-          values={items}
-          onReorder={handleReorder}
-          className="flex flex-col gap-3"
-        >
-          {items.map((item, index) => (
-            <Reorder.Item
-              key={item.id}
-              value={item}
-              className="flex items-start gap-2"
-              dragListener={false}
+      <LocaleTabs
+        tabs={localeTabs}
+        activeLocale={editingLocale}
+        onLocaleChange={setEditingLocale}
+        disabled={translateMutation.isPending}
+        hasContent={hasLocaleContent}
+        defaultLabel={t('agents.conversationStarters.default')}
+        untranslatedLabel={t('agents.conversationStarters.untranslated')}
+        actions={
+          canAutoTranslate ? (
+            <button
+              type="button"
+              onClick={handleAutoTranslate}
+              disabled={translateMutation.isPending}
+              className="text-muted-foreground hover:text-foreground ml-auto flex shrink-0 items-center gap-1 pb-2 text-sm transition-colors disabled:opacity-50"
             >
-              <Reorder.Item
-                as="button"
-                value={item}
-                type="button"
-                className="text-muted-foreground hover:text-foreground mt-2 shrink-0 cursor-grab active:cursor-grabbing"
-                aria-label={t('agents.conversationStarters.dragHandle')}
-              >
-                <GripVertical className="h-4 w-4" />
-              </Reorder.Item>
+              {translateMutation.isPending ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Languages className="size-3.5" />
+              )}
+              {t('agents.conversationStarters.autoTranslate')}
+            </button>
+          ) : undefined
+        }
+      />
 
-              <span className="text-muted-foreground mt-2 text-sm">
+      <FormSection>
+        <ReorderList
+          items={items}
+          onReorder={handleReorder}
+          onMoveUp={handleMoveUp}
+          onMoveDown={handleMoveDown}
+          onRemove={handleRemove}
+          readonlyOrder={isEditingOverride}
+          moveUpLabel={t('agents.conversationStarters.moveUp')}
+          moveDownLabel={t('agents.conversationStarters.moveDown')}
+          dragHandleLabel={t('agents.conversationStarters.dragHandle')}
+          removeLabel={t('agents.conversationStarters.remove')}
+          renderItem={({ item, index }) => (
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-sm">
                 {index + 1}.
               </span>
-
               <Input
                 value={item.text}
                 onChange={(e) => handleChange(item.id, e.target.value)}
@@ -166,47 +288,11 @@ function ConversationStartersTab() {
                 maxLength={MAX_CONVERSATION_STARTER_LENGTH}
                 wrapperClassName="min-w-0 flex-1"
               />
+            </div>
+          )}
+        />
 
-              <div className="mt-0.5 flex shrink-0 flex-col">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5"
-                  onClick={() => handleMoveUp(index)}
-                  disabled={index === 0}
-                  aria-label={t('agents.conversationStarters.moveUp')}
-                >
-                  <ChevronUp className="h-3 w-3" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5"
-                  onClick={() => handleMoveDown(index)}
-                  disabled={index === items.length - 1}
-                  aria-label={t('agents.conversationStarters.moveDown')}
-                >
-                  <ChevronDown className="h-3 w-3" />
-                </Button>
-              </div>
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="mt-1.5 shrink-0"
-                onClick={() => handleRemove(item.id)}
-                aria-label={t('agents.conversationStarters.remove')}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </Reorder.Item>
-          ))}
-        </Reorder.Group>
-
-        {items.length < MAX_CONVERSATION_STARTERS && (
+        {!isEditingOverride && items.length < MAX_CONVERSATION_STARTERS && (
           <Button
             type="button"
             variant="secondary"

@@ -29,13 +29,15 @@ export function generateDevCompose(
     './agents:/app/data/agents',
     './workflows:/app/data/workflows',
     './integrations:/app/data/integrations',
+    './branding:/app/data/branding',
+    './providers:/app/data/providers',
     'caddy-data:/caddy-data:ro',
   ];
   platform.environment = {
+    TALE_CONFIG_DIR: '/app/data',
     AGENTS_DIR: '/app/data/agents',
     WORKFLOWS_DIR: '/app/data/workflows',
     INTEGRATIONS_DIR: '/app/data/integrations',
-    LIVE_RELOAD: 'true',
     ...(options.fresh ? { FORCE_SEED: 'true' } : {}),
   };
   platform.depends_on = { db: { condition: 'service_healthy' } };
@@ -43,9 +45,17 @@ export function generateDevCompose(
   const rag = createRagService(config, DEV_COLOR);
   rag.container_name = `${PROJECT_NAME}-rag`;
   rag.depends_on = { db: { condition: 'service_healthy' } };
+  rag.volumes = [
+    'rag-data:/app/data',
+    './providers:/app/platform-config/providers:ro',
+  ];
 
   const crawler = createCrawlerService(config, DEV_COLOR);
   crawler.container_name = `${PROJECT_NAME}-crawler`;
+  crawler.volumes = [
+    'crawler-data:/app/data',
+    './providers:/app/platform-config/providers:ro',
+  ];
 
   const proxy = createProxyService(config, hostAlias);
   proxy.ports = [`${port}:443`];

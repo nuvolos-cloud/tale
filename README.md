@@ -8,10 +8,20 @@ Tale is a self-hosted AI platform with custom agents, a knowledge base, workflow
 
 **Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop) (v24+) and an [OpenRouter API key](https://openrouter.ai).
 
+> **Windows with Hyper-V backend:** Ensure your project drive is shared in Docker Desktop Settings > Resources > File Sharing. WSL2 backend (default) requires no extra configuration.
+
 ### 1. Install the CLI
+
+**Linux / macOS:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tale-project/tale/main/scripts/install-cli.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/tale-project/tale/main/scripts/install-cli.ps1 | iex
 ```
 
 ### 2. Create a project
@@ -21,7 +31,7 @@ tale init my-project
 cd my-project
 ```
 
-The CLI prompts for your domain, API key, and TLS mode. Security secrets are generated automatically.
+The CLI prompts for your domain, API key, and TLS mode. Security secrets are generated automatically. It also generates AI editor configuration files and extracts the platform source code to `.tale/reference/` so AI-powered editors can create and edit configs with full platform awareness. See [AI-assisted development](docs/ai-assisted-development.md).
 
 ### 3. Start Tale
 
@@ -42,6 +52,7 @@ For detailed setup instructions, see the [Quick start guide](docs/quickstart.md)
 | **Create custom agents**          | Edit JSON files in `agents/` — define instructions, tools, and models    |
 | **Build automations**             | Edit JSON files in `workflows/` — triggers, conditions, loops, AI steps  |
 | **Add integrations**              | Edit files in `integrations/` — REST APIs, SQL databases, custom connectors |
+| **Use AI to build configs**       | Open the project in Claude Code, Cursor, Copilot, or Windsurf — the AI knows your schemas |
 | **Chat with AI assistants**       | Built into the platform — start chatting immediately                      |
 | **Build a knowledge base**        | Upload documents, crawl websites, manage products and customers           |
 | **Manage conversations**          | Unified inbox for customer conversations with AI-assisted replies         |
@@ -131,6 +142,7 @@ cd services/crawler && uv sync --extra dev
 
 ### User guides
 
+- **[AI-assisted development](docs/ai-assisted-development.md)** — Use AI-powered editors to create agents, workflows, and integrations
 - **[AI Chat](docs/ai-chat.md)** — Use the AI chat assistant to explore data, attach files, and select agents
 - **[Knowledge Base](docs/knowledge-base.md)** — Manage documents, websites, products, customers, and vendors
 - **[Conversations](docs/conversations.md)** — Manage customer conversations from a unified inbox

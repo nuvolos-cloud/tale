@@ -1,16 +1,17 @@
 import { Outlet, createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
 
-import { BrandingProvider } from '@/app/components/branding/branding-provider';
 import { AccessDenied } from '@/app/components/layout/access-denied';
 import {
   AdaptiveHeaderProvider,
   AdaptiveHeaderSlot,
 } from '@/app/components/layout/adaptive-header';
-import { Spinner } from '@/app/components/ui/feedback/spinner';
 import { MobileNavigation } from '@/app/components/ui/navigation/mobile-navigation';
 import { Navigation } from '@/app/components/ui/navigation/navigation';
-import { AbilityContext } from '@/app/context/ability-context';
+import {
+  AbilityContext,
+  AbilityLoadingContext,
+} from '@/app/context/ability-context';
 import { useConvexAuth } from '@/app/hooks/use-convex-auth';
 import { useCurrentMemberContext } from '@/app/hooks/use-current-member-context';
 import { TeamFilterProvider } from '@/app/hooks/use-team-filter';
@@ -31,10 +32,13 @@ function DashboardLayout() {
     isError,
   } = useCurrentMemberContext(organizationId, isAuthLoading);
   const { t } = useT('accessDenied');
+  const { t: tNotFound } = useT('common');
 
   const abilityRef = useRef<{ role: string | null; ability: AppAbility }>(null);
 
-  const currentRole = memberContext?.role ?? null;
+  const status = memberContext?.status;
+  const currentRole =
+    memberContext?.status === 'ok' ? memberContext.role : null;
 
   if (!abilityRef.current || abilityRef.current.role !== currentRole) {
     abilityRef.current = {
@@ -59,7 +63,7 @@ function DashboardLayout() {
 
   return (
     <AbilityContext.Provider value={ability}>
-      <BrandingProvider organizationId={organizationId}>
+      <AbilityLoadingContext.Provider value={isLoading}>
         <TeamFilterProvider organizationId={organizationId}>
           <AdaptiveHeaderProvider>
             <div className="flex size-full flex-col overflow-hidden md:flex-row">
@@ -73,12 +77,13 @@ function DashboardLayout() {
               </div>
 
               <div className="border-border bg-background flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:border-l">
-                {hasRole ? (
+                {hasRole || isLoading ? (
                   <Outlet />
-                ) : isLoading ? (
-                  <div className="flex flex-1 items-center justify-center">
-                    <Spinner size="md" />
-                  </div>
+                ) : status === 'not_found' ? (
+                  <AccessDenied
+                    title={tNotFound('notFound.title')}
+                    message={t('workspaceNotFound')}
+                  />
                 ) : (
                   <AccessDenied
                     message={t(isDisabled ? 'disabled' : 'noMembership')}
@@ -88,7 +93,7 @@ function DashboardLayout() {
             </div>
           </AdaptiveHeaderProvider>
         </TeamFilterProvider>
-      </BrandingProvider>
+      </AbilityLoadingContext.Provider>
     </AbilityContext.Provider>
   );
 }

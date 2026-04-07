@@ -111,7 +111,11 @@ export function LogInPage() {
         variant: 'success',
       });
 
-      await queryClient.invalidateQueries({ queryKey: ['auth', 'session'] });
+      await queryClient
+        .invalidateQueries({ queryKey: ['auth', 'session'] })
+        .catch((error) =>
+          console.warn('Session cache invalidation failed:', error),
+        );
       void navigate({ to: redirectTo || '/dashboard' });
     } catch (error) {
       console.error('Log in error:', error);
@@ -148,6 +152,7 @@ export function LogInPage() {
               placeholder={t('emailPlaceholder')}
               disabled={isSubmitting}
               autoComplete="email"
+              isInvalid={!!loginError}
               className="shadow-xs"
               {...form.register('email', {
                 onChange: () => setLoginError(null),
@@ -162,12 +167,22 @@ export function LogInPage() {
               placeholder={t('passwordPlaceholder')}
               disabled={isSubmitting}
               autoComplete="current-password"
-              errorMessage={loginError ?? undefined}
+              isInvalid={!!loginError}
               className="shadow-xs"
               {...form.register('password', {
                 onChange: () => setLoginError(null),
               })}
             />
+
+            {loginError && (
+              <p
+                role="alert"
+                aria-live="polite"
+                className="text-destructive flex items-center gap-1.5 text-sm"
+              >
+                {loginError}
+              </p>
+            )}
 
             <Button
               type="submit"

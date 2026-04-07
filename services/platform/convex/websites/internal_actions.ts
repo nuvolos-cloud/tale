@@ -73,6 +73,31 @@ export async function registerDomainWithCrawler(
   return await res.json();
 }
 
+export async function updateCrawlerScanInterval(
+  domain: string,
+  scanInterval: string,
+): Promise<void> {
+  const crawlerUrl = getCrawlerUrl();
+  const res = await fetchWithTimeout(
+    `${crawlerUrl}/api/v1/websites/${encodeURIComponent(domain)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scan_interval: scanIntervalToSeconds(scanInterval),
+      }),
+    },
+  );
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error('CRAWLER_WEBSITE_NOT_FOUND');
+    }
+    throw new Error(
+      `Failed to update website scan interval: ${res.status} ${res.statusText}`,
+    );
+  }
+}
+
 export async function deregisterDomainFromCrawler(
   domain: string,
 ): Promise<void> {
@@ -115,6 +140,54 @@ interface WebsiteForSync {
   metadata?: Record<string, unknown>;
 }
 
+async function fetchHomepageMetadata(
+  domain: string,
+): Promise<{ title?: string; description?: string } | null> {
+  const crawlerUrl = getCrawlerUrl();
+  const res = await fetchWithTimeout(
+    `${crawlerUrl}/api/v1/urls/fetch`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        urls: [`https://${domain}/`],
+        word_count_threshold: 0,
+      }),
+    },
+    30_000,
+  );
+
+  if (!res.ok) return null;
+
+  const data = await res.json();
+  const page = data.pages?.[0];
+  if (!page) return null;
+
+  const title = page.title || undefined;
+  const sd = page.structured_data;
+  const description =
+    sd?.meta?.description || sd?.opengraph?.['og:description'] || undefined;
+
+  return { title, description };
+}
+
+export const fetchAndPatchHomepage = internalAction({
+  args: {
+    websiteId: v.id('websites'),
+    domain: v.string(),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    const info = await fetchHomepageMetadata(args.domain);
+    if (!info) return;
+
+    await ctx.runMutation(internal.websites.internal_mutations.patchWebsite, {
+      websiteId: args.websiteId,
+      title: info.title,
+      description: info.description,
+    });
+  },
+});
+
 export const syncWebsiteStatuses = internalAction({
   args: {
     organizationId: v.string(),
@@ -154,6 +227,21 @@ export const syncWebsiteStatuses = internalAction({
               lastScannedAt: websiteInfo.last_scanned_at
                 ? new Date(websiteInfo.last_scanned_at).getTime()
                 : undefined,
+            },
+          );
+        } else {
+          // Crawler doesn't know about this website — mark as error
+          await ctx.runMutation(
+            internal.websites.internal_mutations.patchWebsite,
+            {
+              websiteId: website._id,
+              status: 'error',
+              metadata: {
+                ...website.metadata,
+                lastStatusSyncAt: now,
+                lastSyncError:
+                  'Website not found in crawler. Please delete and re-add it.',
+              },
             },
           );
         }
@@ -196,6 +284,13 @@ export const registerAndSync = internalAction({
       });
       return;
     }
+
+    // Async: fetch homepage title & description (non-blocking, independent of scan)
+    await ctx.scheduler.runAfter(
+      0,
+      internal.websites.internal_actions.fetchAndPatchHomepage,
+      { websiteId: args.websiteId, domain: args.domain },
+    );
 
     // Schedule a delayed sync to pick up scan results
     await ctx.scheduler.runAfter(

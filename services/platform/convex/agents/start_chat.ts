@@ -11,7 +11,6 @@ import { v } from 'convex/values';
 import { components } from '../_generated/api';
 import { internalMutation } from '../_generated/server';
 import { startAgentChat } from '../lib/agent_chat';
-import { getDefaultAgentRuntimeConfig } from '../lib/agent_runtime_config';
 import { getOrganizationMember } from '../lib/rls';
 
 export const startChat = internalMutation({
@@ -41,7 +40,7 @@ export const startChat = internalMutation({
       }),
     ),
     agentConfig: v.any(),
-    agentFileName: v.string(),
+    agentSlug: v.string(),
   },
   returns: v.object({
     messageAlreadyExists: v.boolean(),
@@ -61,8 +60,6 @@ export const startChat = internalMutation({
       throw new Error('Thread not found');
     }
 
-    const { model, provider } = getDefaultAgentRuntimeConfig();
-
     return startAgentChat({
       ctx,
       agentType: 'custom',
@@ -74,9 +71,10 @@ export const startChat = internalMutation({
       additionalContext: args.additionalContext,
       userContext: args.userContext,
       agentConfig: args.agentConfig,
-      model: args.agentConfig.model ?? model,
-      provider,
-      debugTag: `[${args.agentFileName}]`,
+      model: args.agentConfig.model ?? 'default',
+      provider: args.agentConfig.provider,
+      agentSlug: args.agentSlug,
+      debugTag: `[${args.agentSlug}]`,
       enableStreaming: true,
     });
   },

@@ -2,34 +2,96 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import pkg from '../../../package.json';
+import { isUserInterrupt } from '../../utils/exit-codes';
 import { loadEnv, PROJECT_NAME } from '../../utils/load-env';
 import * as logger from '../../utils/logger';
 import { StatusHeader, isHealthCheckLog } from '../../utils/terminal';
 import { generateDevCompose } from '../compose/generators/generate-dev-compose';
 import { dockerCompose } from '../docker/docker-compose';
+import { exec } from '../docker/exec';
 import { findProject } from '../project/find-project';
 import { init } from './init';
 
-async function waitForHealthAndOpenBrowser(url: string): Promise<void> {
-  const healthUrl = `${url}/api/health`;
+async function assertDockerAvailable(): Promise<void> {
+  try {
+    const result = await exec('docker', ['info'], {
+      silent: true,
+      timeout: 10,
+    });
+    if (!result.success) {
+      throw new Error(
+        `Docker daemon is not running. Start Docker and try again.\n${result.stderr}`,
+      );
+    }
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      (err as NodeJS.ErrnoException).code === 'ENOENT'
+    ) {
+      throw new Error(
+        'Docker is not installed. Install it from https://docs.docker.com/get-docker/',
+        { cause: err },
+      );
+    }
+    throw err;
+  }
+}
+
+async function openBrowser(url: string): Promise<void> {
+  const commands: string[][] =
+    process.platform === 'darwin'
+      ? [['open', url]]
+      : process.platform === 'win32'
+        ? [['cmd', '/c', 'start', '', url]]
+        : [
+            ['xdg-open', url],
+            ['sensible-browser', url],
+            ['x-www-browser', url],
+          ];
+
+  for (const cmd of commands) {
+    try {
+      const proc = Bun.spawn(cmd, {
+        stdout: 'ignore',
+        stderr: 'ignore',
+        stdin: 'ignore',
+      });
+      const exitCode = await proc.exited;
+      if (exitCode === 0) return;
+    } catch {
+      // Command not found, try next
+    }
+  }
+  logger.warn(`Could not open browser automatically. Visit: ${url}`);
+}
+
+async function waitForHealthAndOpenBrowser(
+  url: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const healthUrl = `${url}/health`;
   const maxAttempts = 120;
 
   for (let i = 0; i < maxAttempts; i++) {
+    if (signal?.aborted) return false;
     try {
-      const res = await fetch(healthUrl, {
-        signal: AbortSignal.timeout(2000),
-      });
+      const fetchSignal = signal
+        ? AbortSignal.any([AbortSignal.timeout(2000), signal])
+        : AbortSignal.timeout(2000);
+      const res = await fetch(healthUrl, { signal: fetchSignal });
       if (res.ok) {
-        const cmd =
-          process.platform === 'darwin' ? ['open', url] : ['xdg-open', url];
-        Bun.spawn(cmd, { stdout: 'ignore', stderr: 'ignore' });
-        return;
+        await openBrowser(url);
+        return true;
       }
     } catch {
-      // Not ready yet
+      if (signal?.aborted) return false;
     }
     await Bun.sleep(1000);
   }
+  logger.warn(
+    `Services did not become healthy within ${maxAttempts}s. Check logs: docker compose -p ${PROJECT_NAME}-dev logs`,
+  );
+  return false;
 }
 
 const URL_PATTERN = /https?:\/\/\S+/;
@@ -63,13 +125,15 @@ export async function start(options: StartOptions): Promise<void> {
     logger.warn('No .env file found. Running environment setup...');
     logger.blank();
     const { ensureEnv } = await import('../config/ensure-env');
-    const success = await ensureEnv({ deployDir: projectDir });
+    const { success } = await ensureEnv({ deployDir: projectDir });
     if (!success) {
       throw new Error(
         'Environment setup failed. Cannot start without .env file.',
       );
     }
   }
+
+  await assertDockerAvailable();
 
   const env = loadEnv(projectDir);
   const version = pkg.version.includes('-dev') ? 'latest' : pkg.version;
@@ -87,8 +151,11 @@ export async function start(options: StartOptions): Promise<void> {
 
   const args = ['up', ...(options.detach ? ['-d'] : [])];
 
+  // AbortController to cancel health polling when docker compose exits
+  const abortController = new AbortController();
+
   // Start browser opener in background (runs concurrently with docker compose)
-  const browserTask = waitForHealthAndOpenBrowser(url);
+  const browserTask = waitForHealthAndOpenBrowser(url, abortController.signal);
 
   if (options.detach) {
     logger.header('Starting Tale (Dev Mode)');
@@ -101,21 +168,34 @@ export async function start(options: StartOptions): Promise<void> {
     const result = await dockerCompose(compose, args, {
       projectName: `${PROJECT_NAME}-dev`,
       cwd: projectDir,
+      inherit: true,
     });
 
     if (!result.success) {
-      logger.error('Failed to start services');
-      if (result.stderr) logger.error(result.stderr);
-      throw new Error('Start failed');
+      abortController.abort();
+      if (!isUserInterrupt(result.exitCode)) {
+        logger.error('Failed to start services');
+        throw new Error('Start failed');
+      }
+      return;
     }
 
-    await browserTask;
+    const healthy = await browserTask;
     logger.blank();
-    logger.success('Tale is running in the background');
+    if (healthy) {
+      logger.success('Tale is running in the background');
+    } else {
+      logger.warn(
+        'Tale is running but services may not be ready yet. Check logs: docker compose -p ' +
+          `${PROJECT_NAME}-dev logs`,
+      );
+    }
     logger.blank();
-    logger.info('Agents and workflows are bind-mounted from your project.');
     logger.info(
-      'Edits to agents/, workflows/, and integrations/ will auto-refresh the browser.',
+      'Agents, workflows, integrations, and branding are bind-mounted from your project.',
+    );
+    logger.info(
+      'Edits to agents/, workflows/, integrations/, and branding/ will auto-refresh the browser.',
     );
     logger.blank();
     logger.info(`Stop with: docker compose -p ${PROJECT_NAME}-dev down`);
@@ -180,13 +260,16 @@ export async function start(options: StartOptions): Promise<void> {
         return;
       }
 
-      process.stdout.write(line + '\n');
+      header.writeLine(line);
     },
   });
 
+  // Stop health polling now that docker compose has exited
+  abortController.abort();
+  await browserTask;
   header.cleanup();
 
-  if (!result.success) {
+  if (!result.success && !isUserInterrupt(result.exitCode)) {
     logger.error('Failed to start services');
     if (result.stderr) logger.error(result.stderr);
     throw new Error('Start failed');

@@ -1,10 +1,12 @@
 'use client';
 
+import { useBlocker } from '@tanstack/react-router';
 import { History, Loader2, Save, Undo2 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
 import type { AgentJsonConfig } from '@/convex/agents/file_utils';
 
+import { ConfirmDialog } from '@/app/components/ui/dialog/confirm-dialog';
 import {
   TabNavigation,
   type TabNavigationItem,
@@ -27,7 +29,7 @@ import { HistoryDiffDialog } from './history-diff-dialog';
 interface AgentNavigationProps {
   organizationId: string;
   agentId: string;
-  onSaved: () => Promise<void>;
+  onSaved: (config: AgentJsonConfig) => void;
 }
 
 interface HistoryEntry {
@@ -42,7 +44,7 @@ export function AgentNavigation({
 }: AgentNavigationProps) {
   const { t } = useT('settings');
   const { t: tCommon } = useT('common');
-  const { config, isDirty, isSaving, resetConfig, markSaving } =
+  const { config, isDirty, isSaving, resetConfig, markSaving, overrideConfig } =
     useAgentConfig();
   const { formatDate } = useFormatDate();
 
@@ -68,6 +70,12 @@ export function AgentNavigation({
   );
   const [isRestoring, setIsRestoring] = useState(false);
   const [isDiffOpen, setIsDiffOpen] = useState(false);
+
+  const blocker = useBlocker({
+    shouldBlockFn: () => isDirty,
+    enableBeforeUnload: () => isDirty,
+    withResolver: true,
+  });
 
   const basePath = `/dashboard/${organizationId}/agents/${agentId}`;
 
@@ -110,7 +118,6 @@ export function AgentNavigation({
   ];
 
   const handleSave = useCallback(async () => {
-    window.__taleLastSaveAt = Date.now();
     markSaving(true);
     try {
       await snapshotAction.mutateAsync({
@@ -122,12 +129,13 @@ export function AgentNavigation({
         agentName: agentId,
         config,
       });
+
       setHistoryEntries([]);
       toast({
         title: t('agents.agentSaved'),
         variant: 'success',
       });
-      await onSaved();
+      onSaved(config);
     } catch (err) {
       console.error(err);
       toast({
@@ -196,7 +204,7 @@ export function AgentNavigation({
   );
 
   const handleRestore = useCallback(async () => {
-    if (!selectedEntry) return;
+    if (!selectedEntry || !snapshotConfig) return;
     setIsRestoring(true);
     try {
       await restoreAction.mutateAsync({
@@ -204,6 +212,8 @@ export function AgentNavigation({
         agentName: agentId,
         timestamp: selectedEntry.timestamp,
       });
+
+      overrideConfig(snapshotConfig);
       setIsDiffOpen(false);
       setSelectedEntry(null);
       setSnapshotConfig(null);
@@ -212,7 +222,7 @@ export function AgentNavigation({
         title: t('agents.historyRestored'),
         variant: 'success',
       });
-      await onSaved();
+      onSaved(snapshotConfig);
     } catch (err) {
       console.error(err);
       toast({
@@ -222,7 +232,15 @@ export function AgentNavigation({
     } finally {
       setIsRestoring(false);
     }
-  }, [agentId, onSaved, restoreAction, selectedEntry, t]);
+  }, [
+    agentId,
+    onSaved,
+    overrideConfig,
+    restoreAction,
+    selectedEntry,
+    snapshotConfig,
+    t,
+  ]);
 
   const historyMenuItems = useMemo(() => {
     if (historyEntries.length === 0) {
@@ -309,6 +327,19 @@ export function AgentNavigation({
           onRestore={() => void handleRestore()}
         />
       )}
+
+      <ConfirmDialog
+        open={blocker.status === 'blocked'}
+        onOpenChange={(open) => {
+          if (!open) blocker.reset?.();
+        }}
+        title={t('agents.unsavedChanges.title')}
+        description={t('agents.unsavedChanges.description')}
+        confirmText={t('agents.unsavedChanges.leave')}
+        cancelText={t('agents.unsavedChanges.stay')}
+        variant="destructive"
+        onConfirm={() => blocker.proceed?.()}
+      />
     </>
   );
 }

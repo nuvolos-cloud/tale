@@ -40,8 +40,9 @@ package-lock.json
 services/platform/.env
 services/platform/.env.local
 
-# Keep example files in git
+# Keep example and test env files in git
 !.env.example
+!.env.test
 !services/platform/.env.example
 
 # typescript
@@ -53,9 +54,11 @@ services/platform/.env.local
 # docker compose
 compose.override.yml
 
+# Trivy vulnerability scan reports
+trivy-reports/
+
 # deployment state files
-.deployment-lock
-.deployment-color
+.tale/
 
 # Claude
 .claude/*
@@ -84,5 +87,6 @@ build/
 # Local ARM64 Dockerfile for operator
 services/operator/Dockerfile.arm64
 
-# Agent examples
-examples/agents/.history/
+# Examples
+examples/**/.history/
+delivery_report.html

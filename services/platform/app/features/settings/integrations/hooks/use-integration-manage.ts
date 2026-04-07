@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
 import { useAction } from 'convex/react';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 
@@ -32,7 +33,7 @@ const SENSITIVE_KEYS = new Set([
 
 const AUTH_HANDLED_KEYS: Record<string, string[]> = {
   api_key: [],
-  bearer_token: [],
+  bearer_token: ['accessToken', 'token', 'key'],
   basic_auth: ['username', 'password'],
   oauth2: ['accessToken', 'refreshToken'],
 };
@@ -67,6 +68,15 @@ export type Integration = Record<string, unknown> & {
     scopes?: string[];
     [key: string]: unknown;
   };
+  operations?: Array<{
+    name: string;
+    title?: string;
+    description?: string;
+    parametersSchema?: Record<string, unknown>;
+    operationType?: string;
+    requiresApproval?: boolean;
+  }>;
+  allowedHosts?: string[];
   connector?: {
     version?: number;
     code?: string;
@@ -127,6 +137,7 @@ export function useIntegrationManage(
 ) {
   const { t } = useT('settings');
   const { t: tCommon } = useT('common');
+  const queryClient = useQueryClient();
 
   const [isUploadingIcon, setIsUploadingIcon] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -488,7 +499,7 @@ export function useIntegrationManage(
     const authMethod = selectedAuthMethod;
     const payload: Record<string, unknown> = {};
 
-    if (authMethod === 'api_key') {
+    if (authMethod === 'api_key' || authMethod === 'bearer_token') {
       const keyBinding = secretBindings.find((b) => SENSITIVE_KEYS.has(b));
       const keyValue = credentials[keyBinding ?? secretBindings[0]];
       if (keyValue?.trim()) {
@@ -732,8 +743,6 @@ export function useIntegrationManage(
   }, [integration._id, integration.organizationId, generateOAuth2Url, t]);
 
   const oauth2FieldsComplete =
-    oauth2Fields.authorizationUrl.trim().length > 0 &&
-    oauth2Fields.tokenUrl.trim().length > 0 &&
     oauth2Fields.clientId.trim().length > 0 &&
     oauth2Fields.clientSecret.trim().length > 0;
 
@@ -743,7 +752,9 @@ export function useIntegrationManage(
   const handleUninstall = useCallback(async () => {
     try {
       await uninstallFn({ orgSlug: 'default', slug: integration.name ?? '' });
-      window.dispatchEvent(new Event('integration-updated'));
+      void queryClient.invalidateQueries({
+        queryKey: ['config', 'integrations'],
+      });
       toast({
         title: t('integrations.manageDialog.deleted'),
         description: t('integrations.manageDialog.deletedDescription', {
@@ -760,11 +771,12 @@ export function useIntegrationManage(
     } finally {
       setConfirmDelete(false);
     }
-  }, [uninstallFn, integration, onOpenChange, t]);
+  }, [uninstallFn, integration, onOpenChange, t, queryClient]);
 
   const operationCount =
-    (integration.connector?.operations?.length ?? 0) +
-    (integration.sqlOperations?.length ?? 0);
+    (integration.connector?.operations?.length ??
+      integration.operations?.length ??
+      0) + (integration.sqlOperations?.length ?? 0);
 
   return {
     t,

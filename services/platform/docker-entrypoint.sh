@@ -10,6 +10,20 @@ set -e
 # 3. Convex Dashboard (admin UI on port 6791)
 # ============================================================================
 
+# ----------------------------------------------------------------------------
+# Privilege handling: fix data directory ownership, then drop to app user.
+# When /app/data is a Docker volume, it may be mounted with root ownership.
+# We fix that here (as root) and re-exec as the unprivileged app user.
+# ----------------------------------------------------------------------------
+if [ "$(id -u)" = '0' ]; then
+  data_dir="${TALE_CONFIG_DIR:-/app/data}"
+  # Ensure all data directories exist and are owned by app
+  mkdir -p "$data_dir/convex" "$data_dir/agents" "$data_dir/workflows" "$data_dir/integrations" "$data_dir/providers"
+  chown -R app:app "$data_dir"
+  # Re-exec this script as the app user
+  exec gosu app "$0" "$@"
+fi
+
 echo "🚀 Starting Tale Platform with integrated Convex backend..."
 
 # ============================================================================
@@ -207,10 +221,6 @@ export BETTER_AUTH_URL="${BETTER_AUTH_URL}"
 # Encryption configuration
 export ENCRYPTION_SECRET_HEX="${ENCRYPTION_SECRET_HEX}"
 
-# LLM provider configuration
-export OPENAI_API_KEY="${OPENAI_API_KEY}"
-export OPENAI_BASE_URL="${OPENAI_BASE_URL}"
-
 # RAG database configuration
 # RAG and Crawler share the tale_knowledge database with separate schemas
 if [ -z "${RAG_DATABASE_URL:-}" ]; then
@@ -405,8 +415,11 @@ export TMPDIR=/app/data/convex/tmp
 mkdir -p "$TMPDIR"
 cd /app
 
+# Ensure TALE_CONFIG_DIR is set for derived paths
+data_dir="${TALE_CONFIG_DIR:-/app/data}"
+
 # Seed default agent JSON files — skip agents the user already has or has modified
-agents_dir="${AGENTS_DIR:-/app/data/agents}"
+agents_dir="${AGENTS_DIR:-${data_dir}/agents}"
 builtin_dir="/app/agents-builtin"
 mkdir -p "$agents_dir"
 if [ -d "$builtin_dir" ] && [ "$(ls -A "$builtin_dir" 2>/dev/null)" ]; then
@@ -430,7 +443,7 @@ if [ -d "$builtin_dir" ] && [ "$(ls -A "$builtin_dir" 2>/dev/null)" ]; then
 fi
 
 # Seed default workflow template JSON files — skip workflows the user has modified or installed
-workflows_dir="${WORKFLOWS_DIR:-/app/data/workflows}"
+workflows_dir="${WORKFLOWS_DIR:-${data_dir}/workflows}"
 workflows_builtin_dir="/app/workflows-builtin"
 mkdir -p "$workflows_dir"
 if [ -d "$workflows_builtin_dir" ] && [ "$(ls -A "$workflows_builtin_dir" 2>/dev/null)" ]; then
@@ -469,7 +482,7 @@ if [ -d "$workflows_builtin_dir" ] && [ "$(ls -A "$workflows_builtin_dir" 2>/dev
 fi
 
 # Seed builtin integration template directories — skip integrations the user has installed
-integrations_dir="${INTEGRATIONS_DIR:-/app/data/integrations}"
+integrations_dir="${INTEGRATIONS_DIR:-${data_dir}/integrations}"
 integrations_builtin_dir="/app/integrations-builtin"
 mkdir -p "$integrations_dir"
 if [ -d "$integrations_builtin_dir" ] && [ "$(ls -A "$integrations_builtin_dir" 2>/dev/null)" ]; then
@@ -491,6 +504,32 @@ if [ -d "$integrations_builtin_dir" ] && [ "$(ls -A "$integrations_builtin_dir" 
     fi
 
     cp -r "$src_dir" "$dest_dir"
+  done
+fi
+
+# Seed builtin provider config files — skip providers the user has configured
+providers_dir="${PROVIDERS_DIR:-${data_dir}/providers}"
+providers_builtin_dir="/app/providers-builtin"
+mkdir -p "$providers_dir"
+if [ -d "$providers_builtin_dir" ] && [ "$(ls -A "$providers_builtin_dir" 2>/dev/null)" ]; then
+  for src in "$providers_builtin_dir"/*.json; do
+    [ -f "$src" ] || continue
+    name="$(basename "$src")"
+    # Skip encrypted secrets files
+    [[ "$name" == *.secrets.json ]] && continue
+    slug="$(basename "$src" .json)"
+    dest="$providers_dir/$name"
+    history_dir="$providers_dir/.history/$slug"
+    if [ "$FORCE_SEED" = "true" ]; then
+      cp "$src" "$dest"
+      echo "   ✓ Seeded provider $name (forced)"
+    elif [ -f "$dest" ]; then
+      echo "   ⏭ Skipping provider $name (already exists)"
+    elif [ -d "$history_dir" ] && [ "$(ls -A "$history_dir" 2>/dev/null)" ]; then
+      echo "   ⏭ Skipping provider $name (user has modifications in .history)"
+    else
+      cp "$src" "$dest"
+    fi
   done
 fi
 
@@ -586,14 +625,6 @@ deploy_convex_functions() {
     "SITE_URL"
     "BASE_PATH"
     "ENCRYPTION_SECRET_HEX"
-    "OPENAI_API_KEY"
-    "OPENAI_BASE_URL"
-    "OPENAI_MODEL"
-    "OPENAI_FAST_MODEL"
-    "OPENAI_VISION_MODEL"
-    "OPENAI_CODING_MODEL"
-    "OPENAI_EMBEDDING_MODEL"
-    "EMBEDDING_DIMENSIONS"
     "BETTER_AUTH_SECRET"
     "AUTH0_DOMAIN"
     "AUTH0_CLIENT_ID"
@@ -611,6 +642,8 @@ deploy_convex_functions() {
     "TRUSTED_EMAIL_HEADER"
     "TRUSTED_NAME_HEADER"
     "TRUSTED_ROLE_HEADER"
+    # Root directory for file-based configs (agents, workflows, integrations, branding)
+    "TALE_CONFIG_DIR"
     # Agents directory (filesystem path for agent JSON configs)
     "AGENTS_DIR"
     # Workflows directory (filesystem path for workflow template JSON configs)
@@ -619,6 +652,8 @@ deploy_convex_functions() {
     "INTEGRATIONS_DIR"
     # Debug flag (enables all debug loggers when set to "true")
     "DEBUG_MODE"
+    # Age secret key for SOPS provider secret encryption/decryption
+    "SOPS_AGE_KEY"
   )
 
   # Fetch current env vars from Convex (output format: KEY=value per line)
@@ -840,4 +875,4 @@ monitor_convex &
 MONITOR_PID=$!
 
 # Wait for all background processes
-wait "$CONVEX_PID" "$VITE_PID" "$DASHBOARD_PID"
+wait "$CONVEX_PID" "$VITE_PID" "$DASHBOARD_PID" "$MONITOR_PID"

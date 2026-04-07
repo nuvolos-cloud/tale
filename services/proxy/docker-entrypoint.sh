@@ -73,8 +73,9 @@ else
         echo "  Email: ${TLS_EMAIL}"
         TLS_CONFIG="tls ${TLS_EMAIL}"
       else
-        echo "  Warning: TLS_EMAIL not set, certificate expiry notifications disabled"
-        TLS_CONFIG="tls"
+        TLS_EMAIL_DEFAULT="tls@${HOST:-tale.local}"
+        echo "  Email: ${TLS_EMAIL_DEFAULT} (default, set TLS_EMAIL to override)"
+        TLS_CONFIG="tls ${TLS_EMAIL_DEFAULT}"
       fi
       ;;
     selfsigned|*)

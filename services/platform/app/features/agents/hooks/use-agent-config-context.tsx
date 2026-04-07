@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -20,6 +21,7 @@ interface AgentConfigContextValue {
   updateConfig: (partial: Partial<AgentJsonConfig>) => void;
   resetConfig: () => void;
   markSaving: (saving: boolean) => void;
+  overrideConfig: (config: AgentJsonConfig) => void;
 }
 
 const AgentConfigContext = createContext<AgentConfigContextValue | null>(null);
@@ -49,6 +51,16 @@ export function AgentConfigProvider({
   const configRef = useRef(config);
   configRef.current = config;
 
+  // Sync with external changes (SSE file events) when user has no unsaved edits
+  useEffect(() => {
+    const hasUnsavedEdits =
+      JSON.stringify(configRef.current) !== JSON.stringify(initialRef.current);
+    if (!hasUnsavedEdits) {
+      setConfig(initialConfig);
+      initialRef.current = initialConfig;
+    }
+  }, [initialConfig]);
+
   const isDirty = useMemo(
     () => JSON.stringify(config) !== JSON.stringify(initialRef.current),
     [config],
@@ -69,6 +81,11 @@ export function AgentConfigProvider({
     }
   }, []);
 
+  const overrideConfig = useCallback((next: AgentJsonConfig) => {
+    setConfig(next);
+    initialRef.current = next;
+  }, []);
+
   const value = useMemo<AgentConfigContextValue>(
     () => ({
       agentName,
@@ -79,6 +96,7 @@ export function AgentConfigProvider({
       updateConfig,
       resetConfig,
       markSaving,
+      overrideConfig,
     }),
     [
       agentName,
@@ -88,6 +106,7 @@ export function AgentConfigProvider({
       updateConfig,
       resetConfig,
       markSaving,
+      overrideConfig,
     ],
   );
 

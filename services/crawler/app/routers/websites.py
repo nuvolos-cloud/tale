@@ -3,19 +3,21 @@ Websites Router — Website registration and URL listing endpoints.
 """
 
 import asyncio
-import hashlib
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from app.models import RegisterWebsiteRequest, WebsiteInfoResponse, WebsiteUrl, WebsiteUrlsResponse
-from app.services.crawler_service import get_crawler_service
+from app.models import (
+    RegisterWebsiteRequest,
+    UpdateWebsiteRequest,
+    WebsiteInfoResponse,
+    WebsiteUrl,
+    WebsiteUrlsResponse,
+)
 from app.services.pg_website_store import PgWebsiteStoreManager
 from app.services.scheduler import cancel_scan, trigger_scan
-from app.utils.metadata import extract_meta_description
-from app.utils.structured_data import format_structured_data
 
 router = APIRouter(prefix="/api/v1/websites", tags=["Websites"])
 
@@ -68,71 +70,6 @@ def _format_timestamp(val) -> str | None:
     return str(val)
 
 
-async def _initialize_website(domain: str, manager: PgWebsiteStoreManager):
-    """Background task: crawl homepage + discover URLs concurrently."""
-    crawler_service = get_crawler_service()
-    if not crawler_service.initialized:
-        await crawler_service.initialize()
-
-    site_store = manager.get_site_store(domain)
-
-    async def _crawl_homepage():
-        homepage_url = f"https://{domain}/"
-        try:
-            results = await crawler_service.crawl_urls(urls=[homepage_url])
-            if not results:
-                return
-            page = results[0]
-            if page.get("content") is None:
-                return
-            title = page.get("title")
-            structured_data = page.get("structured_data")
-            description = extract_meta_description(structured_data)
-
-            content = page["content"]
-            sd_text = format_structured_data(structured_data)
-            if sd_text:
-                content = f"{content}\n\n{sd_text}"
-
-            await site_store.save_discovered_urls([{"url": homepage_url}])
-            await site_store.update_content_hashes(
-                [
-                    {
-                        "url": homepage_url,
-                        "content_hash": hashlib.sha256(content.encode()).hexdigest(),
-                        "status": "active",
-                        "title": title,
-                        "content": content,
-                        "word_count": len(content.split()),
-                        "metadata": page.get("metadata"),
-                        "structured_data": structured_data,
-                    }
-                ]
-            )
-            await manager.update_website_metadata(
-                domain=domain,
-                title=title,
-                description=description,
-                page_count=1,
-            )
-        except Exception:
-            logger.exception(f"Failed to crawl homepage for {domain}")
-
-    async def _discover_urls():
-        try:
-            discovered = await crawler_service.discover_urls(domain=domain, max_urls=-1)
-            if discovered:
-                await site_store.save_discovered_urls(discovered)
-                logger.info(f"Discovered {len(discovered)} URLs for {domain}")
-        except Exception:
-            logger.exception(f"URL discovery failed for {domain}")
-
-    await asyncio.gather(_crawl_homepage(), _discover_urls())
-
-    await manager.update_last_scanned(domain)
-    await manager.update_scan_status(domain, "active")
-
-
 @router.post("", response_model=WebsiteInfoResponse)
 async def register_website(request: RegisterWebsiteRequest, http_request: Request):
     try:
@@ -151,13 +88,10 @@ async def register_website(request: RegisterWebsiteRequest, http_request: Reques
             scan_interval=request.scan_interval,
         )
 
-        # Fire-and-forget: crawl homepage + discover URLs concurrently in background
-        def _on_init_done(t: asyncio.Task) -> None:
-            if not t.cancelled() and (exc := t.exception()):
-                logger.error(f"Website initialization failed for {request.domain}: {exc}")
-
-        task = asyncio.create_task(_initialize_website(request.domain, manager))
-        task.add_done_callback(_on_init_done)
+        # Wake the scheduler — newly registered sites have last_scanned_at=NULL
+        # and will be picked up immediately by get_due_websites().
+        # The scheduler handles URL discovery, crawling, and metadata extraction
+        # with proper concurrency control (max_concurrent_scans semaphore).
         trigger_scan()
 
         return WebsiteInfoResponse(
@@ -170,6 +104,41 @@ async def register_website(request: RegisterWebsiteRequest, http_request: Reques
     except Exception:
         logger.exception("Error registering website")
         raise HTTPException(status_code=500, detail="Failed to register website") from None
+
+
+@router.patch("/{domain}", response_model=WebsiteInfoResponse)
+async def update_website(domain: str, request: UpdateWebsiteRequest, http_request: Request):
+    try:
+        manager = _get_manager(http_request)
+        website = await manager.get_website(domain)
+        if not website:
+            raise HTTPException(status_code=404, detail=f"Website not found: {domain}")
+        if website.get("status") == "deleting":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Domain {domain} is currently being deleted. Please retry later.",
+            )
+
+        await manager.update_scan_interval(domain=domain, scan_interval=request.scan_interval)
+
+        return WebsiteInfoResponse(
+            domain=domain,
+            title=website.get("title"),
+            description=website.get("description"),
+            page_count=website.get("total_urls", 0),
+            crawled_count=website.get("crawled_count", 0),
+            status=website.get("status", "idle"),
+            scan_interval=request.scan_interval,
+            last_scanned_at=_format_timestamp(website.get("last_scanned_at")),
+            error=website.get("error"),
+            created_at=_format_timestamp(website.get("created_at")),
+            updated_at=_format_timestamp(website.get("updated_at")),
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error updating website")
+        raise HTTPException(status_code=500, detail="Failed to update website") from None
 
 
 @router.get("/{domain}", response_model=WebsiteInfoResponse)

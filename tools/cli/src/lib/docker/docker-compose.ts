@@ -11,7 +11,7 @@ interface DockerComposeOptions {
   onLine?: (line: string) => void;
 }
 
-async function pipeLines(
+export async function pipeLines(
   stream: ReadableStream<Uint8Array>,
   onLine: (line: string) => void,
 ) {
@@ -26,10 +26,10 @@ async function pipeLines(
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
     for (const line of lines) {
-      if (line) onLine(line);
+      if (line) onLine(line.replace(/\r$/, ''));
     }
   }
-  if (buffer) onLine(buffer);
+  if (buffer) onLine(buffer.replace(/\r$/, ''));
 }
 
 export async function dockerCompose(
