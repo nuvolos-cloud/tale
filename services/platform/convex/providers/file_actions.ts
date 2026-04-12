@@ -474,6 +474,27 @@ export const resolveModelByTag = internalAction({
       });
     }
 
+    // Zero pass: check TALE_DEFAULT_MODEL env var override (applies to 'chat' tag only)
+    const envDefaultModel = process.env.TALE_DEFAULT_MODEL;
+    if (args.tag === 'chat' && envDefaultModel) {
+      for (const provider of candidates) {
+        const definition = provider.config.models.find(
+          (m) => m.id === envDefaultModel,
+        );
+        if (definition) {
+          return {
+            providerName: provider.name,
+            baseUrl: provider.config.baseUrl,
+            apiKey: provider.secrets.apiKey,
+            modelId: definition.id,
+            dimensions: definition.dimensions,
+            supportsStructuredOutputs:
+              provider.config.supportsStructuredOutputs ?? false,
+          };
+        }
+      }
+    }
+
     // First pass: check for explicit per-tag default
     for (const provider of candidates) {
       const defaults = provider.config.defaults;
