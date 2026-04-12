@@ -4,11 +4,19 @@
   "baseUrl": "https://openrouter.ai/api/v1",
   "supportsStructuredOutputs": true,
   "defaults": {
-    "chat": "deepseek/deepseek-v3.2",
+    "chat": "google/gemma-4-26b-a4b-it:free",
     "vision": "qwen/qwen3-vl-32b-instruct",
     "embedding": "qwen/qwen3-embedding-8b"
   },
   "models": [
+    {
+      "id": "google/gemma-4-26b-a4b-it:free",
+      "displayName": "Gemma 4 26B (Free)",
+      "description": "Google's efficient open-weight model, available for free",
+      "tags": [
+        "chat"
+      ]
+    },
     {
       "id": "moonshotai/kimi-k2.5",
       "displayName": "Kimi K2.5",

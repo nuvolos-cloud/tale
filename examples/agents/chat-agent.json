@@ -18,6 +18,7 @@
     "document_write"
   ],
   "supportedModels": [
+    "google/gemma-4-26b-a4b-it:free",
     "deepseek/deepseek-v3.2",
     "moonshotai/kimi-k2.5",
     "anthropic/claude-opus-4.6",
