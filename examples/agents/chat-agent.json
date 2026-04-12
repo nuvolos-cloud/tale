@@ -13,6 +13,7 @@
     "excel"
   ],
   "supportedModels": [
+    "openrouter:google/gemma-4-31b-it",
     "openrouter:deepseek/deepseek-v4-flash",
     "openrouter:deepseek/deepseek-v3.2",
     "openrouter:moonshotai/kimi-k2.5",

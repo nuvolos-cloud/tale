@@ -12,7 +12,7 @@ function createMockConfig(
     systemInstructions: 'You are a helpful test agent.',
     toolNames: ['web', 'rag_search'],
     integrationBindings: ['integration_1'],
-    supportedModels: ['google/gemma-4-26b-a4b-it:free', 'deepseek/deepseek-v3.2'],
+    supportedModels: ['google/gemma-4-31b-it', 'deepseek/deepseek-v3.2'],
     includeOrgKnowledge: true,
     maxSteps: 10,
     timeoutMs: 60000,
@@ -30,7 +30,7 @@ describe('toSerializableConfig', () => {
     expect(result.instructions).toBe('You are a helpful test agent.');
     expect(result.convexToolNames).toEqual(['web', 'rag_search']);
     expect(result.integrationBindings).toEqual(['integration_1']);
-    expect(result.model).toBe('google/gemma-4-26b-a4b-it:free');
+    expect(result.model).toBe('google/gemma-4-31b-it');
     expect(result.maxSteps).toBe(10);
     expect(result.timeoutMs).toBe(60000);
     expect(result.outputReserve).toBe(2048);
