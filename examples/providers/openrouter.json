@@ -4,15 +4,15 @@
   "baseUrl": "https://openrouter.ai/api/v1",
   "supportsStructuredOutputs": true,
   "defaults": {
-    "chat": "google/gemma-4-26b-a4b-it:free",
+    "chat": "google/gemma-4-31b-it",
     "vision": "qwen/qwen3-vl-32b-instruct",
     "embedding": "qwen/qwen3-embedding-8b"
   },
   "models": [
     {
-      "id": "google/gemma-4-26b-a4b-it:free",
-      "displayName": "Gemma 4 26B (Free)",
-      "description": "Google's efficient open-weight model, available for free",
+      "id": "google/gemma-4-31b-it",
+      "displayName": "Gemma 4 31B",
+      "description": "Google's Gemma 4 31B instruction-tuned model",
       "tags": [
         "chat"
       ]
