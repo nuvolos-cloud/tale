@@ -813,7 +813,7 @@ export async function generateAgentResponse(
               excludeToolMessages: true,
               searchOtherThreads: false,
             },
-            saveStreamDeltas: { chunking: 'line', throttleMs: 100 },
+            saveStreamDeltas: { chunking: 'line' },
           },
         );
 
