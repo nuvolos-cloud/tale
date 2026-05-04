@@ -10,7 +10,7 @@
  * provider instances locally with @ai-sdk/openai-compatible.
  */
 
-import { readdir, unlink } from 'node:fs/promises';
+import { readFile, readdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ConvexError, v } from 'convex/values';
@@ -19,7 +19,6 @@ import type { ProviderSecrets } from '../../lib/shared/schemas/providers';
 import { providerJsonSchema } from '../../lib/shared/schemas/providers';
 import { action, internalAction } from '../_generated/server';
 import { authComponent } from '../auth';
-import { deriveAgePublicKey } from '../lib/age_keygen';
 import { atomicWrite, readJsonFile, sha256 } from '../lib/file_io';
 import { decryptSecretsFile } from '../lib/sops';
 import type { ProviderJson, ProviderReadResult } from './file_utils';
@@ -57,6 +56,40 @@ async function readProviderFile(
   );
   if (result.ok) return { ok: true, config: result.data, hash: result.hash };
   return result;
+}
+
+// Nuvolos fork: SOPS is unavailable in the deployment posture. `tale-init.sh`
+// materializes `*.secrets.json` as plain JSON from `OPENROUTER_API_KEY` at
+// container start, and the admin UI also writes plain JSON. This helper
+// reads such a file, returning null if it's missing or invalid.
+async function readPlainTextProviderSecrets(
+  secretsPath: string,
+): Promise<ProviderSecrets | null> {
+  let raw: string;
+  try {
+    raw = await readFile(secretsPath, 'utf-8');
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (code === 'ENOENT') return null;
+    console.warn(
+      `Failed to read plain-text secrets at ${secretsPath}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
+  try {
+    return parseProviderSecrets(JSON.parse(raw));
+  } catch (err) {
+    console.warn(
+      `Plain-text secrets at ${secretsPath} are invalid:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
+}
+
+function envProviderApiKey(): string | null {
+  return process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? null;
 }
 
 interface ProviderWithSecrets {
@@ -143,19 +176,32 @@ async function loadAllProviders(
       const raw = await decryptSecretsFile(secretsPath);
       secrets = parseProviderSecrets(raw);
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      // ENOENT on the secrets file means the operator has a provider
-      // config but no API key yet — the common "I just created an org"
-      // case. Classify so the UI can point at Settings → Providers.
-      if (/ENOENT/i.test(reason)) {
-        anyMissingSecret = true;
+      // Nuvolos fork: when SOPS is unavailable, fall back to a plain-text
+      // secrets file (seeded by tale-init.sh) and then to the
+      // OPENROUTER_API_KEY / OPENAI_API_KEY env vars.
+      const plain = await readPlainTextProviderSecrets(secretsPath);
+      if (plain) {
+        secrets = plain;
+      } else {
+        const envKey = envProviderApiKey();
+        if (envKey) {
+          secrets = { apiKey: envKey };
+        } else {
+          const reason = err instanceof Error ? err.message : String(err);
+          // ENOENT on the secrets file means the operator has a provider
+          // config but no API key yet — the common "I just created an org"
+          // case. Classify so the UI can point at Settings → Providers.
+          if (/ENOENT/i.test(reason)) {
+            anyMissingSecret = true;
+          }
+          console.warn(
+            `Provider "${providerName}": secrets not available, skipping.`,
+            reason,
+          );
+          skippedReasons.push(`${providerName}: ${reason}`);
+          continue;
+        }
       }
-      console.warn(
-        `Provider "${providerName}": secrets not available, skipping.`,
-        reason,
-      );
-      skippedReasons.push(`${providerName}: ${reason}`);
-      continue;
     }
 
     providers.push({ name: providerName, config: result.data, secrets });
@@ -1214,7 +1260,14 @@ export const testProviderConnection = action({
 // ---------------------------------------------------------------------------
 
 /**
- * Save an API key for a provider by writing a SOPS-encrypted .secrets.json file.
+ * Save an API key for a provider by writing a plain-text .secrets.json file.
+ *
+ * Nuvolos fork: SOPS is unavailable. Existing secrets are read as plain JSON
+ * (seeded by tale-init.sh from OPENROUTER_API_KEY, or written by a previous
+ * call to this action), merged with incoming values, and written back as
+ * plain JSON. Note that `tale-init.sh` re-materializes the file on every
+ * container boot, so UI-driven edits to a Nuvolos-managed provider are
+ * ephemeral by design.
  */
 export const saveProviderSecret = action({
   args: {
@@ -1236,25 +1289,10 @@ export const saveProviderSecret = action({
       args.providerName,
     );
 
-    const sopsAgeKey = process.env.SOPS_AGE_KEY;
-    if (!sopsAgeKey) {
-      throw new Error(
-        'SOPS_AGE_KEY environment variable is not set. ' +
-          'Set it in .env to enable provider secret encryption.',
-      );
-    }
-    const agePublicKey = deriveAgePublicKey(sopsAgeKey);
+    const existing = await readPlainTextProviderSecrets(secretsPath);
 
-    // Read existing secrets to merge with new values
-    let existing: ProviderSecrets | null = null;
-    try {
-      const raw = await decryptSecretsFile(secretsPath);
-      existing = parseProviderSecrets(raw);
-    } catch {
-      // No existing secrets or decryption failed — start fresh
-    }
-
-    const mergedApiKey = args.apiKey ?? existing?.apiKey;
+    const mergedApiKey =
+      args.apiKey ?? existing?.apiKey ?? envProviderApiKey() ?? undefined;
     if (!mergedApiKey) {
       throw new Error(
         'A provider-level API key is required. ' +
@@ -1283,51 +1321,7 @@ export const saveProviderSecret = action({
     }
 
     const plaintext = JSON.stringify(secretsData, null, 2) + '\n';
-    const { execFileSync } = await import('node:child_process');
-    const { writeFileSync, unlinkSync, mkdtempSync, rmdirSync } =
-      await import('node:fs');
-    const { tmpdir } = await import('node:os');
-
-    const tmpDir = mkdtempSync(path.join(tmpdir(), 'sops-'));
-    const tmpFile = path.join(tmpDir, 'plain.json');
-    let encrypted: string;
-    try {
-      writeFileSync(tmpFile, plaintext, 'utf-8');
-      encrypted = execFileSync(
-        'sops',
-        [
-          '-e',
-          '--input-type',
-          'json',
-          '--output-type',
-          'json',
-          '--age',
-          agePublicKey,
-          tmpFile,
-        ],
-        {
-          encoding: 'utf-8',
-          timeout: 10_000,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        },
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `Failed to encrypt secrets for "${args.providerName}": ${message}. ` +
-          'Ensure sops is installed and SOPS_AGE_KEY is set.',
-        { cause: err },
-      );
-    } finally {
-      try {
-        unlinkSync(tmpFile);
-        rmdirSync(tmpDir);
-      } catch {
-        // best-effort cleanup
-      }
-    }
-
-    await atomicWrite(secretsPath, encrypted);
+    await atomicWrite(secretsPath, plaintext);
 
     return null;
   },

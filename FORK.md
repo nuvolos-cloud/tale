@@ -140,6 +140,59 @@ Note: upstream's punctuation/whitespace chunking regex is preserved; only
 
 ---
 
+### 4 — Plain-text provider secrets (no SOPS)
+
+**Intent:** Nuvolos manages secrets externally. The deployment seeds
+`*.secrets.json` as plain JSON from `OPENROUTER_API_KEY` via `tale-init.sh`
+on every container boot, and SOPS is not available at runtime. Upstream's
+provider-secret read and write paths assume SOPS encryption; this patch
+replaces them with a plain-JSON read/merge/write that also falls back to
+the `OPENROUTER_API_KEY` / `OPENAI_API_KEY` env vars.
+
+This patch supersedes the `patch_sops.py` runtime monkey-patch previously
+maintained in `nv-apps/tale_s6/<tag>/`.
+
+**Files changed:**
+
+#### `services/platform/convex/providers/file_actions.ts`
+
+1. Removed import of `deriveAgePublicKey` (no longer used after the
+   `saveProviderSecret` rewrite). Added `readFile` to the `node:fs/promises`
+   import.
+
+2. Added two private helpers near the top of the file:
+   - `readPlainTextProviderSecrets(path)` — reads a plain JSON secrets
+     file, returns `null` on ENOENT or invalid JSON.
+   - `envProviderApiKey()` — returns `OPENROUTER_API_KEY` or
+     `OPENAI_API_KEY`, or `null`.
+
+3. Inside `loadAllProviders`, replaced the `catch` arm of the
+   SOPS decryption block with a progressive fallback:
+   plain-text JSON → env var → original "skip with warning" behavior.
+   The original ENOENT classification (`anyMissingSecret`) is preserved
+   for the no-source-found case.
+
+4. Rewrote the `saveProviderSecret` action body to skip SOPS entirely:
+   read existing as plain JSON, merge `args.apiKey` / `args.modelKeys`,
+   write the merged result back as plain JSON via `atomicWrite`. The
+   `SOPS_AGE_KEY` pre-check, the `sops -e` exec, and the temp-dir
+   plumbing are all removed.
+
+**Out of scope (deliberately not patched):**
+
+- `lib/sops.ts` — left as-is. Its top-level throw is caught by the
+  patched `loadProviders` block; other call sites (`readProvider`,
+  `listProviders`, `probeProviderModels`, `hasProviderSecret`) already
+  tolerate the throw via their own try/catch and degrade gracefully.
+  If a future Nuvolos feature relies on those paths returning real data
+  in the absence of SOPS, extend this patch then.
+- `lib/secret_box.ts` — only relevant to the governance/moderation
+  feature, which Nuvolos does not currently expose. The HKDF-on-
+  `SOPS_AGE_KEY` derivation will throw if that surface is ever hit;
+  patch in a follow-up if/when that becomes a concern.
+
+---
+
 ## Dropped during the v0.2.45 → v0.2.67 rebase
 
 The following patch from the v0.2.45 era was deliberately not reapplied:
