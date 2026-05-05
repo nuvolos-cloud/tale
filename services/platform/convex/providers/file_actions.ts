@@ -92,6 +92,22 @@ function envProviderApiKey(): string | null {
   return process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? null;
 }
 
+// Read provider secrets with progressive fallback: SOPS first (upstream
+// behavior), then plain-text JSON (Nuvolos posture). Returns null if neither
+// source has usable content. The SOPS attempt's error is intentionally
+// swallowed because in the Nuvolos posture it's expected ("Neither
+// SOPS_AGE_KEY nor SOPS_AGE_KEY_FILE is set") and would otherwise spam
+// the logs on every provider read.
+async function readProviderSecrets(
+  secretsPath: string,
+): Promise<ProviderSecrets | null> {
+  try {
+    return parseProviderSecrets(await decryptSecretsFile(secretsPath));
+  } catch {
+    return readPlainTextProviderSecrets(secretsPath);
+  }
+}
+
 interface ProviderWithSecrets {
   name: string;
   config: ProviderJson;
@@ -238,25 +254,15 @@ export const readProvider = action({
 
     // Attach masked per-model API keys (modelId → masked key)
     const maskedModelKeys: Record<string, string> = {};
-    try {
-      const secretsPath = resolveProviderSecretsPath(
-        args.orgSlug,
-        args.providerName,
-      );
-      const raw = await decryptSecretsFile(secretsPath);
-      const secrets = parseProviderSecrets(raw);
-      if (secrets.modelKeys) {
-        for (const [id, key] of Object.entries(secrets.modelKeys)) {
-          if (key) {
-            maskedModelKeys[id] = maskApiKey(key);
-          }
+    const secrets = await readProviderSecrets(
+      resolveProviderSecretsPath(args.orgSlug, args.providerName),
+    );
+    if (secrets?.modelKeys) {
+      for (const [id, key] of Object.entries(secrets.modelKeys)) {
+        if (key) {
+          maskedModelKeys[id] = maskApiKey(key);
         }
       }
-    } catch (err) {
-      console.warn(
-        `Provider "${args.providerName}": failed to read model key overrides`,
-        err instanceof Error ? err.message : String(err),
-      );
     }
 
     return { ...result, maskedModelKeys };
@@ -292,18 +298,10 @@ export const listProviders = action({
         const result = await readProviderFile(args.orgSlug, name);
         if (result.ok) {
           // Try reading secrets to detect per-model API key overrides
-          let modelKeys: Record<string, string> | undefined;
-          try {
-            const secretsPath = resolveProviderSecretsPath(args.orgSlug, name);
-            const raw = await decryptSecretsFile(secretsPath);
-            const secrets = parseProviderSecrets(raw);
-            modelKeys = secrets.modelKeys;
-          } catch (err) {
-            console.warn(
-              `Provider "${name}": failed to read model key overrides`,
-              err instanceof Error ? err.message : String(err),
-            );
-          }
+          const secrets = await readProviderSecrets(
+            resolveProviderSecretsPath(args.orgSlug, name),
+          );
+          const modelKeys = secrets?.modelKeys;
 
           return {
             name,
@@ -1192,7 +1190,12 @@ export const testProviderConnection = action({
       args.orgSlug,
       args.providerName,
     );
-    const secrets = parseProviderSecrets(await decryptSecretsFile(secretsPath));
+    const secrets = await readProviderSecrets(secretsPath);
+    if (!secrets) {
+      throw new Error(
+        `No usable secrets found for provider "${args.providerName}".`,
+      );
+    }
 
     const probes: Promise<ProbeResult>[] = [];
     const skipped: { modelId: string; reason: string }[] = [];
@@ -1354,22 +1357,20 @@ export const hasProviderSecret = action({
       return null;
     }
 
-    try {
-      const secrets = await decryptSecretsFile(secretsPath);
-      const parsed = parseProviderSecrets(secrets);
-
-      if (args.modelId) {
-        const modelKey = parsed.modelKeys?.[args.modelId];
-        if (!modelKey) return null;
-        return maskApiKey(modelKey);
-      }
-
-      const key = parsed.apiKey;
-      if (!key) return null;
-      return maskApiKey(key);
-    } catch {
-      // File exists but can't be decrypted — still report as configured
+    const secrets = await readProviderSecrets(secretsPath);
+    if (!secrets) {
+      // File exists (statFile passed) but unreadable — still report as configured
       return '••••••••••';
     }
+
+    if (args.modelId) {
+      const modelKey = secrets.modelKeys?.[args.modelId];
+      if (!modelKey) return null;
+      return maskApiKey(modelKey);
+    }
+
+    const key = secrets.apiKey;
+    if (!key) return null;
+    return maskApiKey(key);
   },
 });

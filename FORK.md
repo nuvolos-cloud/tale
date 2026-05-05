@@ -160,32 +160,49 @@ maintained in `nv-apps/tale_s6/<tag>/`.
    `saveProviderSecret` rewrite). Added `readFile` to the `node:fs/promises`
    import.
 
-2. Added two private helpers near the top of the file:
+2. Added three private helpers near the top of the file:
    - `readPlainTextProviderSecrets(path)` — reads a plain JSON secrets
      file, returns `null` on ENOENT or invalid JSON.
    - `envProviderApiKey()` — returns `OPENROUTER_API_KEY` or
      `OPENAI_API_KEY`, or `null`.
+   - `readProviderSecrets(path)` — tries `decryptSecretsFile` first
+     (upstream behavior), falls back to `readPlainTextProviderSecrets`.
+     Used by every read site below so SOPS-unavailable errors don't
+     spam the logs.
 
 3. Inside `loadAllProviders`, replaced the `catch` arm of the
    SOPS decryption block with a progressive fallback:
    plain-text JSON → env var → original "skip with warning" behavior.
    The original ENOENT classification (`anyMissingSecret`) is preserved
-   for the no-source-found case.
+   for the no-source-found case. (This site keeps its own inline
+   fallback rather than using `readProviderSecrets` because it also
+   needs the env-var fallback and the original error for ENOENT
+   classification.)
 
-4. Rewrote the `saveProviderSecret` action body to skip SOPS entirely:
-   read existing as plain JSON, merge `args.apiKey` / `args.modelKeys`,
-   write the merged result back as plain JSON via `atomicWrite`. The
-   `SOPS_AGE_KEY` pre-check, the `sops -e` exec, and the temp-dir
-   plumbing are all removed.
+4. Refactored four other read sites to use `readProviderSecrets`,
+   replacing their direct `decryptSecretsFile` calls and removing
+   per-site `try/catch` warnings:
+   - `readProvider` — masked per-model key display
+   - `listProviders` — per-provider modelKeys detection
+   - `probeProviderModels` — now throws a clearer "no usable secrets"
+     error if both SOPS and plain-text fail (was a raw SOPS error)
+   - `hasProviderSecret` — sentinel `'••••••••••'` is now only returned
+     when the file exists but neither SOPS nor plain-text can read it
+
+5. Rewrote the `saveProviderSecret` action body to skip SOPS entirely:
+   read existing as plain JSON via `readPlainTextProviderSecrets`, merge
+   `args.apiKey` / `args.modelKeys`, write the merged result back as
+   plain JSON via `atomicWrite`. The `SOPS_AGE_KEY` pre-check, the
+   `sops -e` exec, and the temp-dir plumbing are all removed. (This
+   site uses the plain-text-only helper rather than `readProviderSecrets`
+   because the function is committed to a plain-text write — mixing a
+   SOPS read with a plain-text write would be inconsistent.)
 
 **Out of scope (deliberately not patched):**
 
-- `lib/sops.ts` — left as-is. Its top-level throw is caught by the
-  patched `loadProviders` block; other call sites (`readProvider`,
-  `listProviders`, `probeProviderModels`, `hasProviderSecret`) already
-  tolerate the throw via their own try/catch and degrade gracefully.
-  If a future Nuvolos feature relies on those paths returning real data
-  in the absence of SOPS, extend this patch then.
+- `lib/sops.ts` — left as-is. Its top-level throw is caught by every
+  call site through `readProviderSecrets` or the inline fallback in
+  `loadAllProviders`.
 - `lib/secret_box.ts` — only relevant to the governance/moderation
   feature, which Nuvolos does not currently expose. The HKDF-on-
   `SOPS_AGE_KEY` derivation will throw if that surface is ever hit;
