@@ -190,6 +190,14 @@ ENV_VARS_TO_SYNC=(
   "TALE_CONFIG_DIR"
   "DEBUG_MODE"
   "SOPS_AGE_KEY"
+  # Nuvolos fork: read by `envProviderApiKey()` in
+  # convex/providers/file_actions.ts as the final fallback when neither
+  # SOPS decryption nor a plain-text *.secrets.json yields a key. Under
+  # normal operation tale-init.sh seeds the secrets file from these, so
+  # the fallback is unreachable — but if the file is missing or malformed,
+  # chat still works.
+  "OPENROUTER_API_KEY"
+  "OPENAI_API_KEY"
 )
 
 deploy_convex_functions() {
