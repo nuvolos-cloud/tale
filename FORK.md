@@ -189,15 +189,7 @@ maintained in `nv-apps/tale_s6/<tag>/`.
    - `hasProviderSecret` — sentinel `'••••••••••'` is now only returned
      when the file exists but neither SOPS nor plain-text can read it
 
-5. Added `OPENROUTER_API_KEY` and `OPENAI_API_KEY` to `ENV_VARS_TO_SYNC` in
-   `services/platform/docker-entrypoint.sh` so the Convex deployment
-   itself sees them. Convex actions read `process.env` from the Convex
-   service's own env, which is populated only by `bunx convex env set`
-   from this list — vars set on the platform container are otherwise
-   invisible to actions. Without this, `envProviderApiKey()` would always
-   return `null` inside Convex even when the host env has the key.
-
-6. Rewrote the `saveProviderSecret` action body to skip SOPS entirely:
+5. Rewrote the `saveProviderSecret` action body to skip SOPS entirely:
    read existing as plain JSON via `readPlainTextProviderSecrets`, merge
    `args.apiKey` / `args.modelKeys`, write the merged result back as
    plain JSON via `atomicWrite`. The `SOPS_AGE_KEY` pre-check, the
@@ -205,6 +197,23 @@ maintained in `nv-apps/tale_s6/<tag>/`.
    site uses the plain-text-only helper rather than `readProviderSecrets`
    because the function is committed to a plain-text write — mixing a
    SOPS read with a plain-text write would be inconsistent.)
+
+#### `services/platform/docker-entrypoint.sh`
+
+1. Added `OPENROUTER_API_KEY` and `OPENAI_API_KEY` to `ENV_VARS_TO_SYNC`
+   so the Convex deployment itself sees them. Convex actions read
+   `process.env` from the Convex service's own env, which is populated
+   only by `bunx convex env set` from this list — vars set on the
+   platform container are otherwise invisible to actions. Without this,
+   `envProviderApiKey()` would always return `null` inside Convex even
+   when the host env has the key.
+
+2. Added a presence check just before the env-sync loop that logs each
+   fallback key's name and value length (never the value itself). Lets
+   operators confirm via boot logs that the operator-supplied key
+   actually reached this container's env, without having to exec into
+   the pod. Expected output on a healthy boot:
+   `[INFO] OPENROUTER_API_KEY present (value length: <N>); will be synced to Convex`.
 
 **Out of scope (deliberately not patched):**
 
