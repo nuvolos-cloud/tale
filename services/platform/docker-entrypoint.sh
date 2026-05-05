@@ -281,6 +281,21 @@ deploy_convex_functions() {
     fi
   done
 
+  # Nuvolos fork: presence check for the chat fallback keys, before the sync
+  # runs. Logs name + value length only — never the value itself. Length is
+  # safe (it's a number) and is enough to confirm the operator-supplied key
+  # actually reached this container's env.
+  local fallback_value
+  for fallback_key in OPENROUTER_API_KEY OPENAI_API_KEY; do
+    fallback_value="${!fallback_key}"
+    if [ -n "$fallback_value" ]; then
+      log_info "$fallback_key present (value length: ${#fallback_value}); will be synced to Convex"
+    else
+      log_warn "$fallback_key not set in platform env — Convex env-var fallback unavailable for this key"
+    fi
+  done
+  unset fallback_value
+
   # 5. Sync each var in ENV_VARS_TO_SYNC.
   local sync_count=0 skip_count=0 unchanged_count=0 remove_count=0
   local failed_vars=()
